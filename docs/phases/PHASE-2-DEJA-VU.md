@@ -9,6 +9,121 @@
 
 ---
 
+## Architecture Overview
+
+### Why This Exists
+
+Claude Code undergoes **compaction** — when the context window fills up, it summarizes past conversations, destroying nuanced instructions, decisions, and preferences. Felix Taylor's research ([FELIX_TAYLOR.md](../research/FELIX_TAYLOR.md)) identified this as the #1 failure mode for long-running agent sessions:
+
+> _"Compaction forces the AI to summarize its context window, often causing it to forget strict instructions and drift off-course."_
+
+The Déjà Vu system solves this with **external persistence** — Neo maintains its own memory in SQLite, independent of Claude's internal state (Audit Fix C1 from [IMPLEMENTATION.md](../research/IMPLEMENTATION.md) §5).
+
+### 5-Tier Memory Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         DÉJÀ VU SYSTEM                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────┐       │
+│  │  T1: SESSION TRANSCRIPTS (Reality Logs)                  │       │
+│  │  ───────────────────────────────────────                 │       │
+│  │  Scope: Per-session, every message in/out                │       │
+│  │  Storage: `messages` table (SQLite)                      │       │
+│  │  Lifecycle: Lives for session duration + archival        │       │
+│  │  Access: Direct lookup by session_id                     │       │
+│  │  Purpose: Source of truth for session context            │       │
+│  └──────────────────────────┬──────────────────────────────┘       │
+│                              │ feeds into                           │
+│  ┌──────────────────────────▼──────────────────────────────┐       │
+│  │  T2: SESSION HANDOFFS (Red Pill Moments)                 │       │
+│  │  ───────────────────────────────────────                 │       │
+│  │  Scope: Triggered at 85% context window fill             │       │
+│  │  Storage: `handoffs` table (JSON snapshots)              │       │
+│  │  Lifecycle: Permanent — never auto-deleted               │       │
+│  │  Access: Searched by keyword match in JSON               │       │
+│  │  Purpose: Preserve nuance before The Fade                │       │
+│  └──────────────────────────┬──────────────────────────────┘       │
+│                              │ summarized by                        │
+│  ┌──────────────────────────▼──────────────────────────────┐       │
+│  │  T3: DAILY LOGS (Oracle's Journal)                       │       │
+│  │  ───────────────────────────────────────                 │       │
+│  │  Scope: All sessions for a calendar day                  │       │
+│  │  Storage: `daily_logs` table (JSON summaries)            │       │
+│  │  Lifecycle: 1 entry per day, permanent                   │       │
+│  │  Access: By date, keyword search in summary              │       │
+│  │  Purpose: "What did I do yesterday?"                     │       │
+│  └─────────────────────────────────────────────────────────┘       │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────┐       │
+│  │  T4: LONG-TERM MEMORY (Déjà Vu Core)                    │       │
+│  │  ───────────────────────────────────────                 │       │
+│  │  Scope: Extracted facts, preferences, decisions          │       │
+│  │  Storage: `memories` table + `memories_fts` (FTS5)       │       │
+│  │  Lifecycle: Permanent with decay tracking (accessed_at)  │       │
+│  │  Access: Full-text search (FTS5 MATCH)                   │       │
+│  │  Purpose: "I know this user prefers dark mode"           │       │
+│  └─────────────────────────────────────────────────────────┘       │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────┐       │
+│  │  T5: OPERATIONAL MEMORY (The Stories)                    │       │
+│  │  ───────────────────────────────────────                 │       │
+│  │  Scope: Static narratives encoding rules/culture         │       │
+│  │  Storage: `workspace/stories/*.md` (file-based)          │       │
+│  │  Lifecycle: Manually authored, version-controlled        │       │
+│  │  Access: Tag-based relevance scoring                     │       │
+│  │  Purpose: Feed rules contextually, not as dense docs     │       │
+│  └─────────────────────────────────────────────────────────┘       │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow: Message → Memory Pipeline
+
+```
+User sends message
+    │
+    ▼
+┌─ Phase 1: Agent Loop Step 8 (MEMORY) ──────────────────────┐
+│                                                              │
+│  1. Record to T1 (session-transcript.record())               │
+│     └── INSERT into `messages` table                         │
+│                                                              │
+│  2. Check for Fade (session-handoff.checkForFade())          │
+│     ├── Calculate: tokens / MODEL_LIMIT                      │
+│     ├── If ratio ≥ 0.85 → capture Red Pill Moment (T2)      │
+│     │   └── Extract: decisions, keyFacts, openQuestions,     │
+│     │       workInProgress, userPreferences                  │
+│     └── Emit 'fade-warning' WebSocket event                  │
+│                                                              │
+│  3. Extract long-term memories (T4) [FUTURE - see §2.8]     │
+│     └── AI-assisted extraction of facts/preferences          │
+│                                                              │
+│  4. Context assembly reads from ALL tiers                    │
+│     ├── T4: FTS5 search for relevant memories                │
+│     ├── T5: Tag-scored stories from filesystem               │
+│     ├── T2: Recent handoff snapshots                         │
+│     └── T1: Current session history                          │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Connection to Research
+
+| Research Source                                       | Key Insight                                       | How Phase 2 Addresses It                              |
+| ----------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------- |
+| [FELIX_TAYLOR.md](../research/FELIX_TAYLOR.md)        | Session Handoffs capture nuance before compaction | T2: `SessionHandoff` with pattern-based extraction    |
+| [FELIX_TAYLOR.md](../research/FELIX_TAYLOR.md)        | Daily Logs using Haiku to summarize tasks         | T3: `DailyLog` with cron scheduling                   |
+| [FELIX_TAYLOR.md](../research/FELIX_TAYLOR.md)        | Operational memory via "5 short stories"          | T5: `OperationalMemory` from `workspace/stories/*.md` |
+| [FELIX_TAYLOR.md](../research/FELIX_TAYLOR.md)        | Full session transcripts for semantic retrieval   | T1: `SessionTranscript` in `messages` table           |
+| [IDEA.md](../research/IDEA.md)                        | "Advanced memory management" requirement          | All 5 tiers + unified search                          |
+| [TOOL.md](../research/TOOL.md)                        | Mem0 for persistent memory layer                  | See §2.9 — Mem0 Integration Roadmap                   |
+| [IMPLEMENTATION.md](../research/IMPLEMENTATION.md) §5 | SDK is opaque — must maintain external history    | T1 is source of truth, not Claude's internal state    |
+| [IMPLEMENTATION.md](../research/IMPLEMENTATION.md) §9 | 5-tier architecture with FTS5                     | Direct implementation of the spec                     |
+
+---
+
 ## 2.1 — Session Transcripts (Tier 1: Reality Logs)
 
 ### `server/src/memory/session-transcript.ts`
@@ -50,6 +165,13 @@ export class SessionTranscript {
   }
 }
 ```
+
+**Audit Notes:**
+
+- The `messages` table has a composite index `idx_messages_session(session_id, timestamp)` — verified in `migrations.ts` v1
+- Foreign key cascade ensures messages are deleted when a session is removed
+- Role constraint: `'user' | 'assistant' | 'system' | 'tool'` — enforced at DB level via CHECK constraint
+- Token estimation uses `ceil(length/4)` heuristic — adequate for Phase 2, consider `tiktoken` for Phase 3+
 
 ---
 
@@ -109,6 +231,38 @@ export class SessionHandoff {
 }
 ```
 
+**Audit Notes:**
+
+- Pattern-based extraction (regex) is a v1 approach — works for structured conversations but misses nuanced decisions expressed in natural language
+- The `last 50 messages` window is a reasonable default but should be configurable
+- Handoff snapshots are stored as JSON blobs — not FTS5-indexed, queried via `LIKE %query%` which is O(n) scan
+- **Gap**: No mechanism to _resume_ from a handoff when starting a new session. The consuming code (in Phase 1's `assembleContext`) must explicitly load recent handoffs into the system prompt
+
+### Session Lifecycle State Machine
+
+```
+                    ┌───────────┐
+     create()  ────►│  ACTIVE   │
+                    └─────┬─────┘
+                          │
+              ┌───────────┼───────────┐
+              │           │           │
+              ▼           ▼           ▼
+        user ends    Fade ≥ 85%    error/crash
+              │           │           │
+              ▼           ▼           ▼
+        ┌─────────┐ ┌─────────┐ ┌─────────┐
+        │  ENDED  │ │  FADED  │ │  ENDED  │
+        └─────────┘ └────┬────┘ └─────────┘
+                         │
+                    Red Pill Moment
+                    snapshot saved
+                         │
+                    New session can
+                    load snapshot as
+                    bootstrap context
+```
+
 ---
 
 ## 2.3 — Daily Log (Tier 3: Oracle's Journal)
@@ -152,7 +306,6 @@ export class DailyLog {
       sessionsCount: todaySessions.length,
       totalMessages: messages.length,
       models: [...new Set(todaySessions.map((s) => s.model))],
-      // Extract decisions, blockers, learnings from message content
       decisions: this.extractByPattern(messages, /decided|chose|will/i),
       blockers: this.extractByPattern(messages, /blocked|stuck|error|failed/i),
       learnings: this.extractByPattern(messages, /learned|realized|turns out|TIL/i),
@@ -177,6 +330,12 @@ export class DailyLog {
   }
 }
 ```
+
+**Audit Notes:**
+
+- `daily_logs.date` has a UNIQUE constraint — prevents duplicate entries for the same day
+- Felix Taylor's approach uses Haiku specifically for summarization to keep costs low. Our cron-based extraction doesn't call Claude at all (pure regex), which is cost-free but less intelligent
+- **Future Enhancement**: Use Haiku via the Claude Bridge to generate richer, AI-assisted summaries instead of regex extraction
 
 ---
 
@@ -207,14 +366,8 @@ export class LongTermMemory {
         Date.now(),
       );
 
-    // Update FTS5 index
-    this.db
-      .prepare(
-        `
-      INSERT INTO memories_fts (rowid, content, tags) VALUES (last_insert_rowid(), ?, ?)
-    `,
-      )
-      .run(entry.content, entry.tags.join(','));
+    // FTS5 index is auto-updated via triggers (see migrations.ts)
+    // No manual INSERT into memories_fts needed
   }
 
   searchFTS(query: string, limit = 10): MemorySearchResult[] {
@@ -236,6 +389,42 @@ export class LongTermMemory {
   touch(memoryId: string) {
     this.db.prepare('UPDATE memories SET accessed_at = ? WHERE id = ?').run(Date.now(), memoryId);
   }
+}
+```
+
+**Audit Notes — FTS5 Sync Triggers:**
+
+The `migrations.ts` file (v1) includes three triggers that keep `memories_fts` in sync with `memories`:
+
+| Trigger       | Event        | Action                                   |
+| ------------- | ------------ | ---------------------------------------- |
+| `memories_ai` | AFTER INSERT | Auto-inserts into FTS5                   |
+| `memories_ad` | AFTER DELETE | Removes from FTS5 via `'delete'` command |
+| `memories_au` | AFTER UPDATE | Delete old + insert new into FTS5        |
+
+> **Important**: Because triggers handle FTS sync, the `store()` method should NOT manually insert into `memories_fts`. The original Phase 2 code had a manual FTS insert which would cause **duplicate entries**. The corrected version above relies on triggers.
+
+**Memory Types** (enforced via CHECK constraint in `migrations.ts`):
+
+| Type         | Description             | Example                            |
+| ------------ | ----------------------- | ---------------------------------- |
+| `fact`       | Objective information   | "Project uses pnpm workspaces"     |
+| `preference` | User preferences        | "User prefers dark mode"           |
+| `decision`   | Architectural decisions | "Chose SQLite over Postgres"       |
+| `learning`   | Lessons learned         | "FTS5 needs content sync triggers" |
+| `correction` | Error corrections       | "Don't use rm -rf on workspace"    |
+
+### Memory Decay Algorithm
+
+The `accessed_at` field enables a decay-based relevance system:
+
+```typescript
+// Future: Score memories by recency + importance
+function decayScore(memory: Memory): number {
+  const ageMs = Date.now() - memory.accessed_at;
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  const decayFactor = Math.exp(-0.1 * ageDays); // Half-life ≈ 7 days
+  return memory.importance * decayFactor;
 }
 ```
 
@@ -274,6 +463,12 @@ export class OperationalMemory {
   }
 }
 ```
+
+**Audit Notes:**
+
+- Stories are also tracked in the `stories` DB table (per `migrations.ts`) for metadata/access logging, but the actual content lives on the filesystem
+- Default stories from [IMPLEMENTATION.md](../research/IMPLEMENTATION.md) §4: `01-who-i-am.md`, `02-how-i-work.md`, `03-my-rules.md`, `04-my-human.md`, `05-my-mission.md`
+- `maxStoriesInContext` defaults to 3 (from config spec in IMPLEMENTATION.md §15) to avoid bloating the system prompt
 
 ---
 
@@ -317,6 +512,14 @@ export class MemorySearch {
 }
 ```
 
+**Audit Notes:**
+
+- T1 (session transcripts) and T5 (stories) are NOT searched in unified search — this is intentional:
+  - T1 is accessed directly via `getHistory(sessionId)` — searching across all sessions would be too noisy
+  - T5 is accessed via `getRelevantStories()` with tag-based scoring, not keyword search
+- Handoff and daily log searches use `LIKE %query%` — no index acceleration. Consider adding FTS5 indexes for these tables if the dataset grows large
+- **Gap**: No relevance ranking across tiers. Results from different tiers aren't normalized for comparison
+
 ---
 
 ## 2.7 — SQLite Backup (Audit Fix M6)
@@ -340,6 +543,96 @@ export function scheduleBackups(
   });
 }
 ```
+
+---
+
+## 2.8 — Memory Extraction Pipeline (Design)
+
+> **Status**: Not yet implemented — this section documents the design for automatic memory extraction from conversations.
+
+The gap between "messages are recorded" (T1) and "memories exist" (T4) requires an extraction step. Two approaches:
+
+### Approach A: Pattern-Based (Phase 2 — Ship Now)
+
+Same regex patterns used in handoff/daily-log extraction. Low cost, instant.
+
+```typescript
+class MemoryExtractor {
+  async extractFromMessage(message: Message, session: Session): Promise<MemoryEntry[]> {
+    const entries: MemoryEntry[] = [];
+
+    // Preference detection
+    if (/prefer|always use|never use|like to/i.test(message.content)) {
+      entries.push({ type: 'preference', content: message.content, importance: 0.7 });
+    }
+
+    // Decision detection
+    if (/decided|chose|will use|going with/i.test(message.content)) {
+      entries.push({ type: 'decision', content: message.content, importance: 0.8 });
+    }
+
+    return entries;
+  }
+}
+```
+
+### Approach B: AI-Assisted (Phase 3+ — Mem0 Integration)
+
+Use Haiku via Claude Bridge to intelligently extract memories. Higher quality, costs tokens.
+
+---
+
+## 2.9 — Mem0 Integration Roadmap
+
+[TOOL.md](../research/TOOL.md) lists **Mem0** as a pre-installed tool for the agent:
+
+> _"Persistent memory layer for AI agents. Handles session memory, long-term recall, and semantic search across conversations."_
+
+### How Mem0 Complements Déjà Vu
+
+| Capability           | Déjà Vu (SQLite)        | Mem0               | Winner  |
+| -------------------- | ----------------------- | ------------------ | ------- |
+| Session transcripts  | ✅ Full control         | ❌ Not its purpose | Déjà Vu |
+| Semantic search      | ❌ FTS5 keyword only    | ✅ Embedding-based | Mem0    |
+| Memory extraction    | ❌ Regex patterns       | ✅ AI-powered      | Mem0    |
+| Offline/local-first  | ✅ SQLite               | ❌ Requires API    | Déjà Vu |
+| Memory decay/scoring | ✅ accessed_at tracking | ✅ Built-in        | Tie     |
+
+### Integration Strategy
+
+Mem0 should augment T4 (Long-term Memory), not replace it:
+
+1. **SQLite stays as primary store** — local-first, no external dependencies
+2. **Mem0 adds semantic search** — re-rank FTS5 results using Mem0's embeddings
+3. **Mem0 handles extraction** — replace regex patterns with Mem0's AI extraction
+4. **Fallback gracefully** — if Mem0 is unavailable, FTS5 still works
+
+---
+
+## 2.10 — Database Schema (Verified)
+
+The following schema is implemented in `server/src/db/migrations.ts` (version 1):
+
+```sql
+-- ✅ Verified: All tables exist with correct constraints
+
+messages    → FK to sessions(id) ON DELETE CASCADE, INDEX(session_id, timestamp)
+handoffs    → FK to sessions(id) ON DELETE CASCADE
+daily_logs  → UNIQUE(date)
+memories    → CHECK(type IN ('fact','preference','decision','learning','correction'))
+memories_fts → FTS5 with sync triggers (ai/ad/au)
+stories     → UNIQUE(filename)
+audit_log   → INDEX(timestamp), INDEX(event_type)
+```
+
+### Schema Differences from IMPLEMENTATION.md Spec
+
+| Field                  | Spec (IMPLEMENTATION.md §14)                                  | Actual (migrations.ts)                                 | Note                                     |
+| ---------------------- | ------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------- |
+| `sessions.metadata`    | TEXT (JSON blob)                                              | ❌ Missing                                             | Not critical for Phase 2                 |
+| `memories.type` values | `fact, preference, knowledge, decision`                       | `fact, preference, decision, learning, correction`     | Expanded — good                          |
+| `stories` schema       | `id, title, content, category, relevance_tags, sort_order`    | `id, filename, title, tags, last_loaded_at`            | Simplified — content lives on filesystem |
+| `audit_log` columns    | `gate_results, model_used, tokens_in, tokens_out, tool_calls` | `gate_name, model_used, tokens_used, blocked, details` | Restructured — equally functional        |
 
 ---
 
@@ -447,7 +740,6 @@ describe('SessionHandoff (Red Pill Moments)', () => {
   });
 
   it('snapshot contains decisions, keyFacts, openQuestions', async () => {
-    // Seed some messages with decision-like content
     const result = await handoff.checkForFade({ id: 's1', model: 'sonnet' }, 180_000);
     if (result.fading) {
       const snapshot = JSON.parse(
@@ -647,10 +939,26 @@ describe('SQLite Backup', () => {
 - [ ] Red Pill Moment snapshot captures decisions, facts, WIP, preferences
 - [ ] Daily log generates via cron and persists to `daily_logs`
 - [ ] FTS5 search returns relevant memories by keyword
+- [ ] FTS5 sync triggers tested (insert/update/delete keep index current)
 - [ ] Stories are loaded from `workspace/stories/` and ranked by relevance
-- [ ] Unified search returns results from all 5 tiers
+- [ ] Unified search returns results from tiers 2, 3, and 4
 - [ ] SQLite backup runs on schedule, keeps last 10 copies
 - [ ] Token estimation works (character heuristic)
+- [ ] Memory extraction pipeline stores at least preference/decision types
+
+---
+
+## Audit Gap Summary
+
+| #   | Gap                                                           | Severity  | Recommendation                                                                       |
+| --- | ------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------ |
+| G1  | No automatic memory extraction from conversations (T1 → T4)   | 🔴 High   | Implement regex-based `MemoryExtractor` in Phase 2, upgrade to Mem0/AI in Phase 3    |
+| G2  | FTS5 manual insert in `store()` duplicates trigger-based sync | 🟡 Medium | Remove manual FTS insert, rely on triggers (fixed in §2.4 above)                     |
+| G3  | Handoff snapshots not searchable via FTS5                     | 🟡 Medium | Add FTS5 index for `handoffs.snapshot` or extract key terms into a searchable column |
+| G4  | No session resumption from handoff snapshots                  | 🟡 Medium | Add `loadHandoffContext(sessionId)` to bootstrap new sessions from previous Fade     |
+| G5  | Daily log uses regex extraction, not AI summarization         | 🟢 Low    | Phase 3 upgrade to use Haiku via Claude Bridge for richer summaries                  |
+| G6  | `sessions.metadata` column missing from migrations            | 🟢 Low    | Add in migration v2 if needed                                                        |
+| G7  | No cross-tier relevance normalization in unified search       | 🟢 Low    | Implement scoring normalization when embedding search arrives                        |
 
 ---
 
@@ -663,7 +971,8 @@ server/src/memory/
 ├── daily-log.ts               ← NEW
 ├── long-term.ts               ← NEW
 ├── operational-memory.ts      ← NEW
-└── search.ts                  ← NEW
+├── search.ts                  ← NEW
+└── extractor.ts               ← NEW (memory extraction pipeline)
 server/src/db/
 └── backup.ts                  ← NEW (M6)
 ```
