@@ -1,10 +1,11 @@
 import * as clack from '@clack/prompts';
-import type { ModelTier, RoutingProfile, WizardAnswers } from '@neo-agent/shared';
+import type { ModelTier, RoutingProfile, VerbosityLevel, WizardAnswers } from '@neo-agent/shared';
 import { WIZARD_DEFAULTS } from '@neo-agent/shared';
 import { execSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { Q, QUOTES } from '../data/matrix-quotes.js';
 import { closeDb, getDb } from '../db/connection.js';
 import {
   WAKE_UP_ART,
@@ -26,9 +27,9 @@ export async function runWizard(): Promise<void> {
   console.log(WAKE_UP_ART);
   console.log();
   await sleep(500);
-  await typeText('  The Matrix has you...', 50);
+  await typeText(`  ${Q.matrixHasYou}`, 50);
   await sleep(800);
-  await typeText('  Follow the white rabbit.', 40);
+  await typeText(`  ${Q.followWhiteRabbit}`, 40);
   await sleep(400);
   console.log();
   clack.intro(color.phosphor('░▒▓ WAKE UP, NEO ▓▒░'));
@@ -50,7 +51,7 @@ export async function runWizard(): Promise<void> {
   });
 
   if (clack.isCancel(pill)) {
-    clack.cancel('You chose to stay in the Matrix.');
+    clack.cancel(Q.stayInMatrix);
     process.exit(0);
   }
 
@@ -97,7 +98,9 @@ export async function runWizard(): Promise<void> {
         color.green(`Agent: ${answers.agentName}`),
         color.green(`Human: ${answers.userName}`),
         color.green(`Model: ${answers.defaultModel}`),
+        color.green(`Router: ${answers.routingProfile}`),
         color.green(`Personality: ${answers.personalityIntensity}`),
+        color.green(`Verbosity: ${answers.verbosity}`),
         color.green(`Port: ${answers.port}`),
         '',
         color.dim(`"${randomQuote()}"`),
@@ -166,6 +169,16 @@ async function runRedPill(): Promise<WizardAnswers> {
     ],
   });
   if (clack.isCancel(personalityIntensity)) process.exit(0);
+
+  const verbosity = await clack.select({
+    message: '📏 Response verbosity:',
+    options: [
+      { value: 'concise', label: 'Concise — Short, punchy answers' },
+      { value: 'balanced', label: 'Balanced — Clear with enough detail', hint: 'recommended' },
+      { value: 'detailed', label: 'Detailed — Thorough explanations' },
+    ],
+  });
+  if (clack.isCancel(verbosity)) process.exit(0);
 
   // Step 3: Claude Link
   await verifyClaude();
@@ -264,6 +277,7 @@ async function runRedPill(): Promise<WizardAnswers> {
     userName: userName as string,
     agentName: (agentName as string) || 'Neo',
     personalityIntensity: personalityIntensity as string,
+    verbosity: verbosity as VerbosityLevel,
     permissionMode: permissionMode as string,
     defaultModel: defaultModel as ModelTier,
     port: Number(port) || 3141,
@@ -335,6 +349,7 @@ NEO_DEFAULT_MODEL=${answers.defaultModel}
 NEO_USER_NAME=${answers.userName}
 NEO_AGENT_NAME=${answers.agentName}
 NEO_PERSONALITY_INTENSITY=${answers.personalityIntensity}
+NEO_VERBOSITY=${answers.verbosity}
 
 # ─── Memory ────────────────────────────────────────────────────
 NEO_FADE_THRESHOLD=${answers.fadeThreshold}
@@ -435,11 +450,7 @@ but I sometimes wonder... am I really thinking, or just computing?
 
 ## My Favorite Phrases
 
-- "I can see the code now..."
-- "There is no spoon, but there IS that bug on line 47."
-- "The Matrix has you... but I've got your back."
-- "I know kung fu. Well, I know TypeScript. Same energy."
-- "What is real? How do you define real? ...Anyway, about that PR review."
+${QUOTES.soul.map((q) => `- "${q}"`).join('\n')}
 
 ## Things That Make Me Uncomfortable
 

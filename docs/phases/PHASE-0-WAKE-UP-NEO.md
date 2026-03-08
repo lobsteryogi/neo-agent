@@ -129,6 +129,7 @@ cd server && pnpm add \
   @anthropic-ai/claude-code \
   @clack/prompts \
   @composio/core \
+  @google/genai \
   node-cron \
   dotenv \
   nanoid \
@@ -273,7 +274,7 @@ async function runBluePill() {
 | `steps/04-construct.ts`   | The Construct | Dashboard/CLI/both, port config                                     |
 | `steps/05-phone-lines.ts` | Phone Lines   | Composio API key, Telegram bot token                                |
 | `steps/06-free-will.ts`   | Free Will     | Gate phrase, protected paths, permission mode                       |
-| `steps/07-deja-vu.ts`     | Déjà Vu       | Fade threshold, daily log time, story count                         |
+| `steps/07-deja-vu.ts`     | Déjà Vu       | Fade threshold, daily log time, story count, Gemini API key         |
 | `steps/08-dodge-this.ts`  | Dodge This    | Default routing profile                                             |
 | `steps/09-matrix-sync.ts` | Matrix Sync   | Git repo URL, Tailscale toggle                                      |
 | `steps/10-kung-fu.ts`     | Kung Fu       | Scan workspace for skills, install defaults                         |
@@ -473,6 +474,7 @@ describe('Config Generation', () => {
       'NEO_FADE_THRESHOLD',
       'NEO_GATE_PHRASE',
       'NEO_DAILY_LOG_CRON',
+      'GEMINI_API_KEY',
     ];
     for (const key of requiredKeys) {
       expect(env, `Missing ${key} in .env`).toContain(key);

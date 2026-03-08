@@ -21,7 +21,7 @@ export class ClaudeBridge extends EventEmitter {
       // Dynamic import to avoid issues if SDK isn't installed
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
-      const conversation = query({
+      const queryOpts: any = {
         prompt,
         options: {
           cwd: opts.cwd,
@@ -30,7 +30,15 @@ export class ClaudeBridge extends EventEmitter {
           systemPrompt: opts.systemPrompt,
           allowedTools: opts.allowedTools,
         },
-      });
+      };
+
+      // Support session resume
+      if ((opts as any).sessionId) {
+        queryOpts.options.resume = true;
+        queryOpts.options.sessionId = (opts as any).sessionId;
+      }
+
+      const conversation = query(queryOpts);
 
       let resultContent = '';
       const messages: any[] = [];

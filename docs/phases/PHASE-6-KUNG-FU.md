@@ -1,32 +1,107 @@
-# Phase 6 — Kung Fu Downloads (Skills + Acquisition)
+# Phase 6 — Kung Fu Downloads (Skill System)
 
 > _"I know kung fu." / "Show me."_
 
-**Goal**: Build the skill system (SKILL.md folder scanner, registry, execution context) and proactive skill acquisition via Firecrawl.
+**Goal**: Build a skill calling & learning system — scan `SKILL.md` files from disk, register them into a queryable catalog, match relevant skills to user messages for system prompt injection, and support on-demand skill acquisition.
 
 **Estimated time**: 4-6 hours
-**Prerequisites**: Phase 3 complete (Firecrawl integration, Cron scheduler)
+**Prerequisites**: Phase 1 complete (agent loop, Claude Bridge)
 
 ---
 
-## 6.1 — Skill Registry
+## 6.1 — Skill Loader
+
+### `server/src/skills/loader.ts`
+
+Parses a `SKILL.md` file with YAML frontmatter and extracts the markdown body as executable instructions. Scans for companion `scripts/` and `examples/` subdirectories.
+
+```typescript
+import { existsSync, readdirSync, readFileSync } from 'fs';
+import { basename, dirname, join } from 'path';
+import type { Skill } from '@neo-agent/shared';
+
+export class SkillLoader {
+  parse(skillMdPath: string): Skill {
+    const raw = readFileSync(skillMdPath, 'utf-8');
+    const { frontmatter, body } = this.parseFrontmatter(raw);
+
+    return {
+      name: frontmatter.name ?? basename(dirname(skillMdPath)),
+      description: frontmatter.description ?? '',
+      tags: frontmatter.tags ?? [],
+      instructions: body.trim(),
+      path: dirname(skillMdPath),
+      scripts: this.scanDir(dirname(skillMdPath), 'scripts'),
+      examples: this.scanDir(dirname(skillMdPath), 'examples'),
+    };
+  }
+
+  private parseFrontmatter(raw: string): { frontmatter: Record<string, any>; body: string } {
+    const fenceRegex = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/;
+    const match = raw.match(fenceRegex);
+    if (!match) return { frontmatter: {}, body: raw };
+
+    const frontmatter: Record<string, any> = {};
+    for (const line of match[1].split('\n')) {
+      const [key, ...rest] = line.split(':');
+      if (!key?.trim()) continue;
+      const value = rest.join(':').trim();
+
+      if (value.startsWith('[') && value.endsWith(']')) {
+        frontmatter[key.trim()] = value
+          .slice(1, -1)
+          .split(',')
+          .map((s) => s.trim());
+      } else {
+        frontmatter[key.trim()] = value;
+      }
+    }
+    return { frontmatter, body: match[2] };
+  }
+
+  private scanDir(skillDir: string, subdir: string): string[] {
+    const dir = join(skillDir, subdir);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir);
+  }
+}
+```
+
+---
+
+## 6.2 — Skill Registry
 
 ### `server/src/skills/registry.ts`
 
+Scans a directory for skill folders containing `SKILL.md` files. Provides lookup, listing, and idempotent reload.
+
 ```typescript
+import { existsSync, readdirSync } from 'fs';
+import { join } from 'path';
+import type { Skill } from '@neo-agent/shared';
+import { SkillLoader } from './loader.js';
+
 export class SkillRegistry {
   private skills = new Map<string, Skill>();
+  private loader = new SkillLoader();
 
-  async loadFromDirectory(skillsDir: string) {
+  loadFromDirectory(skillsDir: string) {
+    if (!existsSync(skillsDir)) return;
+
     const folders = readdirSync(skillsDir, { withFileTypes: true }).filter((d) => d.isDirectory());
 
     for (const folder of folders) {
       const skillMdPath = join(skillsDir, folder.name, 'SKILL.md');
       if (existsSync(skillMdPath)) {
-        const skill = await this.loader.parse(skillMdPath);
+        const skill = this.loader.parse(skillMdPath);
         this.skills.set(skill.name, skill);
       }
     }
+  }
+
+  reload(skillsDir: string) {
+    this.skills.clear();
+    this.loadFromDirectory(skillsDir);
   }
 
   getAll(): Skill[] {
@@ -35,120 +110,152 @@ export class SkillRegistry {
   get(name: string): Skill | undefined {
     return this.skills.get(name);
   }
-}
-```
-
----
-
-## 6.2 — SKILL.md Parser
-
-### `server/src/skills/loader.ts`
-
-```typescript
-export class SkillLoader {
-  async parse(skillMdPath: string): Promise<Skill> {
-    const raw = readFileSync(skillMdPath, 'utf-8');
-    const { frontmatter, body } = this.parseFrontmatter(raw);
-
-    return {
-      name: frontmatter.name ?? basename(dirname(skillMdPath)),
-      description: frontmatter.description ?? '',
-      tags: frontmatter.tags ?? [],
-      instructions: body,
-      path: dirname(skillMdPath),
-      scripts: this.scanScripts(dirname(skillMdPath)),
-      examples: this.scanExamples(dirname(skillMdPath)),
-    };
+  has(name: string): boolean {
+    return this.skills.has(name);
   }
-
-  private scanScripts(dir: string): string[] {
-    const scriptsDir = join(dir, 'scripts');
-    if (!existsSync(scriptsDir)) return [];
-    return readdirSync(scriptsDir);
+  get size(): number {
+    return this.skills.size;
   }
 }
 ```
 
 ---
 
-## 6.3 — Proactive Skill Acquisition
+## 6.3 — Skill Matcher
 
-### `server/src/skills/acquisition.ts`
+### `server/src/skills/matcher.ts`
 
-Uses Firecrawl + Cron to proactively learn from the web:
-
-```typescript
-export class SkillAcquisition {
-  constructor(
-    private crawler: CrawlerTool,
-    private scheduler: SchedulerTool,
-    private registry: SkillRegistry,
-  ) {}
-
-  startSchedule(cronExpr = '0 3 * * *') {
-    // 3am daily
-    this.scheduler.schedule('skill-acquisition', cronExpr, () => this.run());
-  }
-
-  async run() {
-    // Check for new skill sources (configured URLs, trending repos, etc.)
-    const sources = await this.getSkillSources();
-    for (const source of sources) {
-      try {
-        const markdown = await this.crawler.scrapeToMarkdown(source.url);
-        await this.createSkillFromMarkdown(source.name, markdown);
-      } catch (err) {
-        console.warn(`Failed to acquire skill from ${source.url}:`, err);
-      }
-    }
-  }
-
-  private async createSkillFromMarkdown(name: string, content: string) {
-    const skillDir = join(this.skillsDir, name);
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(
-      join(skillDir, 'SKILL.md'),
-      [
-        '---',
-        `name: ${name}`,
-        `description: Auto-acquired skill`,
-        `tags: [acquired, auto]`,
-        '---',
-        '',
-        content,
-      ].join('\n'),
-    );
-    await this.registry.loadFromDirectory(this.skillsDir);
-  }
-}
-```
-
----
-
-## 6.4 — Skill Execution Context
-
-### `server/src/skills/executor.ts`
-
-When a skill is relevant to the current task, inject its context into the system prompt:
+Matches relevant skills to a user query based on tag and name keyword matching. Returns formatted context blocks ready for system prompt injection.
 
 ```typescript
-export class SkillExecutor {
+import type { Skill } from '@neo-agent/shared';
+import type { SkillRegistry } from './registry.js';
+
+export class SkillMatcher {
+  constructor(private registry: SkillRegistry) {}
+
+  /** Find skills relevant to the query and format as system prompt context. */
   getActiveContexts(query: string, maxSkills = 2): string[] {
-    const allSkills = this.registry.getAll();
-    return allSkills
+    return this.registry
+      .getAll()
       .filter((s) => this.isRelevant(s, query))
       .slice(0, maxSkills)
-      .map((s) => `## Skill: ${s.name}\n${s.instructions}`);
+      .map((s) => `## Skill: ${s.name}\n\n${s.instructions}`);
+  }
+
+  /** Get raw matching skills (without formatting). */
+  findRelevant(query: string, maxSkills = 2): Skill[] {
+    return this.registry
+      .getAll()
+      .filter((s) => this.isRelevant(s, query))
+      .slice(0, maxSkills);
   }
 
   private isRelevant(skill: Skill, query: string): boolean {
-    const queryLower = query.toLowerCase();
+    const q = query.toLowerCase();
     return (
-      skill.tags.some((t) => queryLower.includes(t.toLowerCase())) ||
-      queryLower.includes(skill.name.toLowerCase())
+      skill.tags.some((t) => q.includes(t.toLowerCase())) || q.includes(skill.name.toLowerCase())
     );
   }
 }
+```
+
+---
+
+## 6.4 — Skill Learner
+
+### `server/src/skills/learner.ts`
+
+Acquires new skills on demand. Given a name and markdown content, creates a `SKILL.md` folder and reloads the registry.
+
+```typescript
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import type { SkillRegistry } from './registry.js';
+
+export interface LearnOptions {
+  name: string;
+  description?: string;
+  tags?: string[];
+  content: string;
+}
+
+export class SkillLearner {
+  constructor(
+    private skillsDir: string,
+    private registry: SkillRegistry,
+  ) {}
+
+  learn(opts: LearnOptions): string {
+    const skillDir = join(this.skillsDir, opts.name);
+    if (existsSync(skillDir)) {
+      throw new Error(`Skill "${opts.name}" already exists at ${skillDir}`);
+    }
+
+    mkdirSync(skillDir, { recursive: true });
+
+    const frontmatter = [
+      '---',
+      `name: ${opts.name}`,
+      `description: ${opts.description ?? 'Auto-acquired skill'}`,
+      `tags: [${(opts.tags ?? ['acquired', 'auto']).join(', ')}]`,
+      '---',
+    ].join('\n');
+
+    writeFileSync(join(skillDir, 'SKILL.md'), `${frontmatter}\n\n${opts.content}`);
+    this.registry.reload(this.skillsDir);
+    return skillDir;
+  }
+
+  hasSkill(name: string): boolean {
+    return existsSync(join(this.skillsDir, name, 'SKILL.md'));
+  }
+}
+```
+
+---
+
+## 6.5 — Integration with Agent Loop
+
+### Changes to `server/src/core/agent.ts`
+
+The skill system enriches the agent's system prompt with relevant skill instructions — pure prompt augmentation, no new pipeline stage.
+
+```typescript
+// In NeoAgent constructor:
+import { SkillRegistry } from '../skills/registry.js';
+import { SkillMatcher } from '../skills/matcher.js';
+
+this.skillRegistry = new SkillRegistry();
+this.skillRegistry.loadFromDirectory(join(config.workspacePath, 'skills'));
+this.skillMatcher = new SkillMatcher(this.skillRegistry);
+
+// In buildSystemPrompt(session, query):
+private buildSystemPrompt(session: any, query?: string): string {
+  const base = `You are ${this.config.agentName}, a personal AI agent...`;
+  if (!query) return base;
+
+  const skillContexts = this.skillMatcher.getActiveContexts(query);
+  if (skillContexts.length === 0) return base;
+
+  return [base, '', '# Active Skills', '', ...skillContexts].join('\n');
+}
+```
+
+### API Endpoints — `server/src/index.ts`
+
+```typescript
+app.get('/api/skills', (_req, res) => {
+  res.json(
+    skillRegistry.getAll().map(({ name, description, tags }) => ({ name, description, tags })),
+  );
+});
+
+app.get('/api/skills/:name', (req, res) => {
+  const skill = skillRegistry.get(req.params.name);
+  if (!skill) return res.status(404).json({ error: 'Skill not found' });
+  res.json(skill);
+});
 ```
 
 ---
@@ -158,159 +265,38 @@ export class SkillExecutor {
 ### `server/tests/phase-6/skill-loader.test.ts`
 
 ```typescript
-import { describe, it, expect } from 'vitest';
-import { SkillLoader } from '../../src/skills/loader';
-import { writeFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
-
 describe('SkillLoader', () => {
-  const loader = new SkillLoader();
-  const tmpDir = join(__dirname, '__tmp_skill__');
-
-  beforeEach(() => {
-    mkdirSync(join(tmpDir, 'scripts'), { recursive: true });
-    writeFileSync(
-      join(tmpDir, 'SKILL.md'),
-      [
-        '---',
-        'name: test-skill',
-        'description: A test skill',
-        'tags: [testing, vitest]',
-        '---',
-        '',
-        '# Test Skill',
-        '',
-        'This skill does testing.',
-      ].join('\n'),
-    );
-  });
-
-  it('parses frontmatter name', async () => {
-    const skill = await loader.parse(join(tmpDir, 'SKILL.md'));
-    expect(skill.name).toBe('test-skill');
-  });
-
-  it('parses frontmatter description', async () => {
-    const skill = await loader.parse(join(tmpDir, 'SKILL.md'));
-    expect(skill.description).toBe('A test skill');
-  });
-
-  it('parses frontmatter tags', async () => {
-    const skill = await loader.parse(join(tmpDir, 'SKILL.md'));
-    expect(skill.tags).toEqual(['testing', 'vitest']);
-  });
-
-  it('extracts markdown body as instructions', async () => {
-    const skill = await loader.parse(join(tmpDir, 'SKILL.md'));
-    expect(skill.instructions).toContain('# Test Skill');
-    expect(skill.instructions).toContain('This skill does testing.');
-  });
-
-  it('scans scripts/ subdirectory', async () => {
-    writeFileSync(join(tmpDir, 'scripts', 'run.sh'), '#!/bin/bash\necho hello');
-    const skill = await loader.parse(join(tmpDir, 'SKILL.md'));
-    expect(skill.scripts).toContain('run.sh');
-  });
-
-  it('returns empty scripts when scripts/ does not exist', async () => {
-    const bareDir = join(__dirname, '__tmp_bare_skill__');
-    mkdirSync(bareDir, { recursive: true });
-    writeFileSync(join(bareDir, 'SKILL.md'), '---\nname: bare\n---\nHello');
-    const skill = await loader.parse(join(bareDir, 'SKILL.md'));
-    expect(skill.scripts).toEqual([]);
-  });
-
-  it('falls back to directory name when name not in frontmatter', async () => {
-    const noName = join(__dirname, '__tmp_noname__');
-    mkdirSync(noName, { recursive: true });
-    writeFileSync(join(noName, 'SKILL.md'), '---\ndescription: no name\n---\nContent');
-    const skill = await loader.parse(join(noName, 'SKILL.md'));
-    expect(skill.name).toBe('__tmp_noname__');
-  });
+  it('parses frontmatter name, description, and tags');
+  it('extracts markdown body as instructions');
+  it('scans scripts/ and examples/ subdirectories');
+  it('returns empty arrays when subdirs do not exist');
+  it('falls back to directory name when name not in frontmatter');
 });
 ```
 
 ### `server/tests/phase-6/skill-registry.test.ts`
 
 ```typescript
-import { describe, it, expect, beforeEach } from 'vitest';
-import { SkillRegistry } from '../../src/skills/registry';
-
 describe('SkillRegistry', () => {
-  let registry: SkillRegistry;
-
-  beforeEach(async () => {
-    registry = new SkillRegistry();
-    await registry.loadFromDirectory(join(__dirname, '__fixtures__', 'skills'));
-  });
-
-  it('loads all skills from directory', () => {
-    expect(registry.getAll().length).toBeGreaterThan(0);
-  });
-
-  it('retrieves a specific skill by name', () => {
-    const skill = registry.get('test-skill');
-    expect(skill).toBeDefined();
-    expect(skill?.name).toBe('test-skill');
-  });
-
-  it('returns undefined for non-existent skill', () => {
-    expect(registry.get('nonexistent')).toBeUndefined();
-  });
-
-  it('ignores directories without SKILL.md', async () => {
-    // Create a dir without SKILL.md
-    const emptyDir = join(__dirname, '__fixtures__', 'skills', 'no-skill-md');
-    mkdirSync(emptyDir, { recursive: true });
-    const freshRegistry = new SkillRegistry();
-    await freshRegistry.loadFromDirectory(join(__dirname, '__fixtures__', 'skills'));
-    expect(freshRegistry.get('no-skill-md')).toBeUndefined();
-  });
+  it('loads all skills from directory');
+  it('retrieves a specific skill by name');
+  it('returns undefined for non-existent skill');
+  it('ignores directories without SKILL.md');
+  it('reload clears and reloads skills');
+  it('reports correct size');
 });
 ```
 
-### `server/tests/phase-6/skill-executor.test.ts`
+### `server/tests/phase-6/skill-matcher.test.ts`
 
 ```typescript
-import { describe, it, expect } from 'vitest';
-import { SkillExecutor } from '../../src/skills/executor';
-
-describe('SkillExecutor', () => {
-  const executor = new SkillExecutor(mockRegistry);
-
-  it('returns relevant skills matching query keywords', () => {
-    const contexts = executor.getActiveContexts('help me with testing');
-    expect(contexts.length).toBeGreaterThan(0);
-    expect(contexts[0]).toContain('Skill:');
-  });
-
-  it('returns empty array when no skills match', () => {
-    const contexts = executor.getActiveContexts('completely unrelated quantum physics');
-    expect(contexts).toHaveLength(0);
-  });
-
-  it('limits to maxSkills parameter', () => {
-    const contexts = executor.getActiveContexts('testing deployment debugging', 1);
-    expect(contexts.length).toBeLessThanOrEqual(1);
-  });
-
-  it('matches by tag name', () => {
-    // Assuming a skill tagged with 'vitest'
-    const contexts = executor.getActiveContexts('vitest setup');
-    expect(contexts.length).toBeGreaterThan(0);
-  });
-
-  it('matches by skill name', () => {
-    const contexts = executor.getActiveContexts('test-skill usage');
-    expect(contexts.length).toBeGreaterThan(0);
-  });
-
-  it('formats context as markdown with skill name header', () => {
-    const contexts = executor.getActiveContexts('testing');
-    if (contexts.length > 0) {
-      expect(contexts[0]).toMatch(/^## Skill: /);
-    }
-  });
+describe('SkillMatcher', () => {
+  it('matches skills by tag keyword');
+  it('matches skills by name');
+  it('returns empty array when no skills match');
+  it('limits to maxSkills parameter');
+  it('formats context with skill name header');
+  it('findRelevant returns raw Skill objects');
 });
 ```
 
@@ -318,21 +304,24 @@ describe('SkillExecutor', () => {
 
 ## Acceptance Criteria
 
-- [ ] SKILL.md files parsed with frontmatter (name, description, tags)
+- [ ] `SKILL.md` files parsed with frontmatter (name, description, tags)
 - [ ] Skills auto-discovered from `workspace/skills/` directories
-- [ ] Skill browser shows all installed skills with metadata
-- [ ] Proactive acquisition scrapes URLs and creates SKILL.md files
-- [ ] Relevant skills injected into system prompt context
-- [ ] Scheduled acquisition runs via Cron
+- [ ] `SkillMatcher` finds and injects relevant skills into system prompt
+- [ ] `SkillLearner` creates new `SKILL.md` files on demand
+- [ ] `/api/skills` lists all installed skills
+- [ ] `/api/skills/:name` returns full skill details
+- [ ] Agent system prompt enriched with matching skill contexts
 
 ---
 
 ## Files Created
 
-```
+```text
 server/src/skills/
-├── registry.ts        ← NEW
-├── loader.ts          ← NEW
-├── executor.ts        ← NEW
-└── acquisition.ts     ← NEW
+├── index.ts           ← NEW (barrel export)
+├── loader.ts          ← NEW (SKILL.md parser)
+├── registry.ts        ← NEW (directory scanner)
+├── matcher.ts         ← NEW (query-based matching)
+├── learner.ts         ← NEW (on-demand acquisition)
+└── clawhub.ts         ← NEW (ClawHub.ai API client)
 ```

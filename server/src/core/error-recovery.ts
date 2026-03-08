@@ -8,6 +8,7 @@
  */
 
 import type { AgentResponse } from '@neo-agent/shared';
+import { getQuote } from '../data/matrix-quotes.js';
 
 export interface ErrorRecoveryDeps {
   logError: (sessionKey: string, error: Error) => void;
@@ -38,7 +39,7 @@ export class ErrorRecovery {
     // 3. Classify and respond
     if (err.message.includes('TIMEOUT')) {
       return {
-        content: '"Time ran out. Even in the Matrix, patience has limits."',
+        content: `"${getQuote('timeRanOut')}"`,
         model: 'sonnet',
         retryable: true,
         neoQuip: 'The Deadline',
@@ -47,9 +48,7 @@ export class ErrorRecovery {
 
     if (err.message.includes('SQLITE')) {
       return {
-        content:
-          message._lastPartialResponse ??
-          '"My memories are... corrupted. I delivered the response but couldn\'t save it."',
+        content: message._lastPartialResponse ?? `"${getQuote('memoriesCorrupted')}"`,
         model: 'sonnet',
         retryable: false,
         neoQuip: 'Déjà Vu Error',
@@ -58,7 +57,7 @@ export class ErrorRecovery {
 
     // Generic fallback
     return {
-      content: '"Something broke in the Matrix. I\'m still here though."',
+      content: `"${getQuote('somethingBroke')}"`,
       model: 'sonnet',
       retryable: true,
       neoQuip: 'System Error',

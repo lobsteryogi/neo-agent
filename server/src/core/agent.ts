@@ -9,11 +9,16 @@
  * Memory and Router are stubbed for Phase 1 (built in Phase 2 & 3).
  */
 
-import type { AgentResponse, InboundMessage, NeoConfig, RouteDecision } from '@neo-agent/shared';
+import type { AgentResponse, InboundMessage, NeoConfig } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
+import { join } from 'path';
 import { GateManager } from '../gates/index.js';
 import { GuardrailPipeline } from '../guardrails/index.js';
 import { HarnessPipeline } from '../harness/index.js';
+import { TaskClassifier, type ClassifierContext } from '../router/classifier.js';
+import { RouterEngine } from '../router/engine.js';
+import { SkillMatcher } from '../skills/matcher.js';
+import { SkillRegistry } from '../skills/registry.js';
 import { ClaudeBridge } from './claude-bridge.js';
 import { ErrorRecovery } from './error-recovery.js';
 import { SessionQueue } from './session-queue.js';
@@ -28,6 +33,10 @@ export class NeoAgent {
   private queue: SessionQueue;
   private recovery: ErrorRecovery;
   private config: NeoConfig;
+  private classifier: TaskClassifier;
+  private router: RouterEngine;
+  private skillRegistry: SkillRegistry;
+  private skillMatcher: SkillMatcher;
 
   constructor(db: Database.Database, config: NeoConfig) {
     this.config = config;
@@ -46,6 +55,15 @@ export class NeoAgent {
         // Stub — Phase 2 (Déjà Vu) will implement real persistence
       },
     });
+
+    // Phase 3 — Dodge This: Smart Router
+    this.classifier = new TaskClassifier();
+    this.router = new RouterEngine(db);
+
+    // Phase 6 — Kung Fu: Skill calling & learning
+    this.skillRegistry = new SkillRegistry();
+    this.skillRegistry.loadFromDirectory(join(config.workspacePath, 'skills'));
+    this.skillMatcher = new SkillMatcher(this.skillRegistry);
   }
 
   async handleMessage(message: InboundMessage): Promise<AgentResponse> {
@@ -70,22 +88,15 @@ export class NeoAgent {
     );
 
     // 3. Context assembly (stub — Phase 2)
-    const systemPrompt = this.buildSystemPrompt(session);
+    const systemPrompt = this.buildSystemPrompt(session, sanitized.content);
 
-    // 4. Route (stub — Phase 3)
-    const route: RouteDecision = {
-      selectedModel: this.config.defaultModel,
-      score: 0.5,
-      classification: {
-        complexity: 0.5,
-        tokenEstimate: 1000,
-        contextNeeds: 0.5,
-        precisionRequired: 0.5,
-        toolUsage: false,
-        speedPriority: 0.5,
-      },
-      maxTurns: 10,
+    // 4. Route — classify then select optimal model tier (Phase 3)
+    const context: ClassifierContext = {
+      tokenCount: session.totalTokens ?? 0,
+      hasActiveTools: false,
     };
+    const classification = this.classifier.classify(sanitized.content, context);
+    const route = this.router.selectModel(classification, this.config.routingProfile);
 
     // 5. Gate check (PRE-EXECUTION scope)
     const gateResult = await this.gates.check(sanitized, {
@@ -128,8 +139,16 @@ export class NeoAgent {
     };
   }
 
-  private buildSystemPrompt(session: any): string {
-    return `You are ${this.config.agentName}, a personal AI agent for ${this.config.userName}. Session: ${session.id}`;
+  private buildSystemPrompt(session: any, query?: string): string {
+    const base = `You are ${this.config.agentName}, a personal AI agent for ${this.config.userName}. Session: ${session.id}`;
+
+    if (!query) return base;
+
+    // Inject relevant skill contexts (Phase 6 — Kung Fu)
+    const skillContexts = this.skillMatcher.getActiveContexts(query);
+    if (skillContexts.length === 0) return base;
+
+    return [base, '', '# Active Skills', '', ...skillContexts].join('\n');
   }
 
   private looksLikeExecution(content: string): boolean {

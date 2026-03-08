@@ -4,17 +4,18 @@
 
 ## Phase Overview
 
-| Phase | Codename                                                | Description                                                           | Est. Hours | Tests               |
-| ----- | ------------------------------------------------------- | --------------------------------------------------------------------- | ---------- | ------------------- |
-| **0** | [Wake Up, Neo](./PHASE-0-WAKE-UP-NEO.md)                | Monorepo scaffold, SDK POC, onboard wizard, DB init                   | 4-6h       | 4 files / 25 tests  |
-| **1** | [Core Engine](./PHASE-1-CORE-ENGINE.md)                 | Agent loop, Claude Bridge, gates, guardrails, harness, error recovery | 8-12h      | 7 files / ~50 tests |
-| **2** | [Déjà Vu](./PHASE-2-DEJA-VU.md)                         | 5-tier memory system, FTS5 search, Fade detection, SQLite backup      | 6-8h       | 5 files / ~25 tests |
-| **3** | [Router + Sync + Tools](./PHASE-3-ROUTER-SYNC-TOOLS.md) | Smart router, Composio/Firecrawl/Cron, sibling awareness, Git sync    | 6-8h       | 4 files / ~25 tests |
-| **4** | [The Construct](./PHASE-4-THE-CONSTRUCT.md)             | React dashboard, Matrix theme, streaming chat, 9 views                | 10-14h     | 3 files / ~20 tests |
-| **5** | [Phone Lines](./PHASE-5-PHONE-LINES.md)                 | Channel architecture, Telegram bot, WS auth, CLI                      | 4-6h       | 1 file / ~15 tests  |
-| **6** | [Kung Fu](./PHASE-6-KUNG-FU.md)                         | Skill system, SKILL.md parser, proactive Firecrawl acquisition        | 4-6h       | 3 files / ~20 tests |
+| Phase | Codename                                                | Description                                                            | Est. Hours | Tests               |
+| ----- | ------------------------------------------------------- | ---------------------------------------------------------------------- | ---------- | ------------------- |
+| **0** | [Wake Up, Neo](./PHASE-0-WAKE-UP-NEO.md)                | Monorepo scaffold, SDK POC, onboard wizard, DB init                    | 4-6h       | 4 files / 25 tests  |
+| **1** | [Core Engine](./PHASE-1-CORE-ENGINE.md)                 | Agent loop, Claude Bridge, gates, guardrails, harness, error recovery  | 8-12h      | 7 files / ~50 tests |
+| **2** | [Déjà Vu](./PHASE-2-DEJA-VU.md)                         | 5-tier memory system, FTS5 search, Fade detection, SQLite backup       | 6-8h       | 5 files / ~25 tests |
+| **3** | [Router + Sync + Tools](./PHASE-3-ROUTER-SYNC-TOOLS.md) | Smart router, Composio/Firecrawl/Cron, sibling awareness, Git sync     | 6-8h       | 4 files / ~25 tests |
+| **4** | [The Construct](./PHASE-4-THE-CONSTRUCT.md)             | React dashboard, Matrix theme, streaming chat, 9 views                 | 10-14h     | 3 files / ~20 tests |
+| **5** | [Phone Lines](./PHASE-5-PHONE-LINES.md)                 | Channel architecture, Telegram bot, WS auth, CLI                       | 4-6h       | 1 file / ~15 tests  |
+| **6** | [Kung Fu](./PHASE-6-KUNG-FU.md)                         | Skill system, SKILL.md parser, proactive Firecrawl acquisition         | 4-6h       | 3 files / ~20 tests |
+| **7** | [The Ones](./PHASE-7-THE-ONES.md)                       | Sub-agent orchestration, agent teams, workspace isolation, message bus | 8-12h      | 5 files / ~25 tests |
 
-**Total estimate: 42-60 hours**
+**Total estimate: 50-72 hours**
 
 ## Dependency Graph
 
@@ -24,7 +25,8 @@ Phase 0 (scaffold)
         └── Phase 2 (memory)
               └── Phase 3 (router + tools + sync)
                     ├── Phase 4 (dashboard)
-                    └── Phase 6 (skills)
+                    ├── Phase 6 (skills)
+                    └── Phase 7 (sub-agents)
 ```
 
 ## CTO Audit Fix Distribution
@@ -54,5 +56,5 @@ All 13 audit findings are addressed across the phases:
 
 1. **Start with Phase 0** — validate that the Claude Code SDK works as expected before building the entire architecture on assumptions
 2. **Phase 1 is the critical path** — everything depends on the agent loop
-3. **Phases 4-6 can be parallelized** once Phase 3 is complete
+3. **Phases 4-7 can be parallelized** once Phase 3 is complete
 4. **Ship iteratively** — each phase has acceptance criteria; don't move on until all pass

@@ -582,30 +582,148 @@ Use Haiku via Claude Bridge to intelligently extract memories. Higher quality, c
 
 ---
 
-## 2.9 — Mem0 Integration Roadmap
+## 2.9 — Gemini Embedding Search (Semantic Layer)
 
-[TOOL.md](../research/TOOL.md) lists **Mem0** as a pre-installed tool for the agent:
+Google's [Gemini Embedding API](https://ai.google.dev/gemini-api/docs/embeddings) provides free, multilingual embeddings that solve the FTS5 tokenization gap — especially critical for **Thai + English** mixed-language memory search.
 
-> _"Persistent memory layer for AI agents. Handles session memory, long-term recall, and semantic search across conversations."_
+### Why Gemini Embeddings Over Mem0
 
-### How Mem0 Complements Déjà Vu
+| Aspect           | Gemini Embeddings      | Mem0                     | Winner              |
+| ---------------- | ---------------------- | ------------------------ | ------------------- |
+| Cost             | ✅ Free tier           | ✅ Free (OSS)            | Tie                 |
+| Thai + English   | ✅ Native multilingual | ⚠️ Depends on model      | Gemini              |
+| Complexity       | ✅ One API call        | ❌ Framework + vector DB | Gemini              |
+| Control          | ✅ You own the vectors | ❌ Abstracted            | Gemini              |
+| Dependencies     | `@google/genai` only   | `mem0ai` + vector DB     | Gemini              |
+| Storage          | ✅ SQLite BLOB column  | ❌ Separate vector DB    | Gemini              |
+| Offline fallback | ❌ Needs API           | ❌ Needs API             | Tie (FTS5 fallback) |
 
-| Capability           | Déjà Vu (SQLite)        | Mem0               | Winner  |
-| -------------------- | ----------------------- | ------------------ | ------- |
-| Session transcripts  | ✅ Full control         | ❌ Not its purpose | Déjà Vu |
-| Semantic search      | ❌ FTS5 keyword only    | ✅ Embedding-based | Mem0    |
-| Memory extraction    | ❌ Regex patterns       | ✅ AI-powered      | Mem0    |
-| Offline/local-first  | ✅ SQLite               | ❌ Requires API    | Déjà Vu |
-| Memory decay/scoring | ✅ accessed_at tracking | ✅ Built-in        | Tie     |
+### Model: `gemini-embedding-001`
 
-### Integration Strategy
+| Property          | Value                                                          |
+| ----------------- | -------------------------------------------------------------- |
+| Input token limit | 2,048 tokens                                                   |
+| Output dimensions | Flexible: 768 / 1536 / 3072 (MRL-based)                        |
+| Recommended       | **768** for personal agent (<10K memories = ~30MB)             |
+| Task types        | `RETRIEVAL_QUERY`, `RETRIEVAL_DOCUMENT`, `SEMANTIC_SIMILARITY` |
+| Languages         | Multilingual — Thai, English, and 100+ languages               |
 
-Mem0 should augment T4 (Long-term Memory), not replace it:
+### Hybrid Search Architecture
 
-1. **SQLite stays as primary store** — local-first, no external dependencies
-2. **Mem0 adds semantic search** — re-rank FTS5 results using Mem0's embeddings
-3. **Mem0 handles extraction** — replace regex patterns with Mem0's AI extraction
-4. **Fallback gracefully** — if Mem0 is unavailable, FTS5 still works
+```
+Query: "ฉันชอบโหมดมืด" (I like dark mode)
+
+  ┌─ Pass 1: FTS5 (fast, keyword) ──────────────────┐
+  │  MATCH "ฉันชอบโหมดมืด" → ❌ no match            │  ← Thai tokenization fail
+  └──────────────────────────────────────────────────┘
+
+  ┌─ Pass 2: Gemini Embedding (semantic) ───────────┐
+  │  cosine_similarity(query_vec, memory_vecs) →     │
+  │  0.94: "User prefers dark mode"  ✅              │  ← cross-language match!
+  │  0.87: "ชอบใช้ theme สีเข้ม"     ✅              │
+  └──────────────────────────────────────────────────┘
+```
+
+### Implementation
+
+#### `server/src/memory/embeddings.ts`
+
+```typescript
+import { GoogleGenAI } from '@google/genai';
+
+export class EmbeddingService {
+  private client: GoogleGenAI;
+  private readonly MODEL = 'gemini-embedding-001';
+  private readonly DIMENSIONS = 768;
+
+  constructor(apiKey: string) {
+    this.client = new GoogleGenAI({ apiKey });
+  }
+
+  async embed(
+    text: string,
+    taskType: 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY' = 'RETRIEVAL_DOCUMENT',
+  ): Promise<Float32Array> {
+    const result = await this.client.models.embedContent({
+      model: this.MODEL,
+      content: text,
+      config: { taskType, outputDimensionality: this.DIMENSIONS },
+    });
+    return new Float32Array(result.embedding.values);
+  }
+
+  cosineSimilarity(a: Float32Array, b: Float32Array): number {
+    let dot = 0,
+      magA = 0,
+      magB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      magA += a[i] * a[i];
+      magB += b[i] * b[i];
+    }
+    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+  }
+
+  async searchByEmbedding(
+    query: string,
+    memories: { id: string; embedding: Buffer }[],
+    topK = 5,
+  ): Promise<{ id: string; score: number }[]> {
+    const queryVec = await this.embed(query, 'RETRIEVAL_QUERY');
+
+    return memories
+      .map((m) => ({
+        id: m.id,
+        score: this.cosineSimilarity(queryVec, new Float32Array(m.embedding.buffer)),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK);
+  }
+}
+```
+
+#### Migration v2: Add embedding column
+
+```sql
+-- server/src/db/migrations.ts — version 2
+ALTER TABLE memories ADD COLUMN embedding BLOB;
+CREATE INDEX IF NOT EXISTS idx_memories_has_embedding
+  ON memories(id) WHERE embedding IS NOT NULL;
+```
+
+### Storage Budget
+
+| Scale         | Dimensions | Per Memory | Total Storage |
+| ------------- | ---------- | ---------- | ------------- |
+| 1K memories   | 768        | ~3KB       | ~3MB          |
+| 10K memories  | 768        | ~3KB       | ~30MB         |
+| 100K memories | 768        | ~3KB       | ~300MB        |
+
+For a personal agent, brute-force cosine scan over <10K memories is ~1ms. If it grows beyond 100K, add `sqlite-vss` for ANN indexing.
+
+### Onboard Wizard Integration
+
+The Gemini API key is configured during **Step 07 (Déjà Vu)** of the onboard wizard. See [PHASE-0-WAKE-UP-NEO.md](./PHASE-0-WAKE-UP-NEO.md) §0.3.
+
+- **Blue Pill**: Skipped (FTS5-only mode, no API key needed)
+- **Red Pill**: Prompted for `GEMINI_API_KEY` with a link to [Google AI Studio](https://aistudio.google.com/apikey)
+
+### Fallback Strategy
+
+```typescript
+// If GEMINI_API_KEY is not set, fall back to FTS5-only search
+const hasEmbeddings = !!process.env.GEMINI_API_KEY;
+
+async search(query: string): Promise<SearchResult[]> {
+  const ftsResults = this.longTerm.searchFTS(query);
+
+  if (!hasEmbeddings) return ftsResults;
+
+  // Hybrid: FTS5 fast-pass + embedding re-rank
+  const embeddingResults = await this.embeddings.searchByEmbedding(query, allMemories);
+  return this.mergeAndRank(ftsResults, embeddingResults);
+}
+```
 
 ---
 
@@ -972,6 +1090,7 @@ server/src/memory/
 ├── long-term.ts               ← NEW
 ├── operational-memory.ts      ← NEW
 ├── search.ts                  ← NEW
+├── embeddings.ts              ← NEW (Gemini semantic search)
 └── extractor.ts               ← NEW (memory extraction pipeline)
 server/src/db/
 └── backup.ts                  ← NEW (M6)

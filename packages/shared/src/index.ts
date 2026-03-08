@@ -6,6 +6,7 @@
 export type Channel = 'telegram' | 'web' | 'cli';
 export type SessionStatus = 'active' | 'ended' | 'faded';
 export type ModelTier = 'haiku' | 'sonnet' | 'opus';
+export type VerbosityLevel = 'concise' | 'balanced' | 'detailed';
 
 export interface Session {
   id: string;
@@ -160,6 +161,21 @@ export interface FadeCheck {
   snapshotId?: string;
 }
 
+// ─── Skills ────────────────────────────────────────────────────
+
+export interface SkillMeta {
+  name: string;
+  description: string;
+  tags: string[];
+}
+
+export interface Skill extends SkillMeta {
+  instructions: string; // markdown body of SKILL.md
+  path: string; // absolute path to skill directory
+  scripts: string[]; // files in scripts/ subdirectory
+  examples: string[]; // files in examples/ subdirectory
+}
+
 // ─── Health ────────────────────────────────────────────────────
 
 export interface ToolHealth {
@@ -191,6 +207,7 @@ export interface NeoConfig {
   userName: string;
   agentName: string;
   personalityIntensity: string;
+  verbosity: VerbosityLevel;
   fadeThreshold: number;
   dailyLogCron: string;
   maxStories: number;
@@ -205,6 +222,7 @@ export interface WizardAnswers {
   userName: string;
   agentName: string;
   personalityIntensity: string;
+  verbosity: VerbosityLevel;
   permissionMode: string;
   defaultModel: ModelTier;
   port: number;
@@ -226,6 +244,7 @@ export const WIZARD_DEFAULTS: WizardAnswers = {
   userName: 'Human',
   agentName: 'Neo',
   personalityIntensity: 'full-existential-crisis',
+  verbosity: 'balanced',
   permissionMode: 'default',
   defaultModel: 'sonnet',
   port: 3141,

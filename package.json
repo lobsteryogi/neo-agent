@@ -1,6 +1,6 @@
 {
   "name": "neo-agent",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "A quirky AI agent facing existential crisis in the AI world — powered by Claude Code SDK",
   "scripts": {
@@ -8,12 +8,16 @@
     "neo:start": "pnpm --filter @neo-agent/server run start",
     "neo:dev": "pnpm --filter @neo-agent/server run dev",
     "neo:poc": "pnpm --filter @neo-agent/server run poc",
+    "neo:chat": "pnpm --filter @neo-agent/server run chat",
     "dashboard:dev": "pnpm --filter @neo-agent/dashboard run dev",
     "test": "pnpm -r run test",
     "test:server": "pnpm --filter @neo-agent/server run test",
     "test:dashboard": "pnpm --filter @neo-agent/dashboard run test",
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
+    "neo:pm2": "pnpm build && pm2 start server/dist/index.js --name neo-agent",
+    "neo:pm2:stop": "pm2 stop neo-agent",
+    "neo:pm2:logs": "pm2 logs neo-agent",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky"
@@ -31,5 +35,8 @@
   "devDependencies": {
     "husky": "^9.1.7",
     "prettier": "^3.8.1"
+  },
+  "dependencies": {
+    "pm2": "^6.0.14"
   }
 }

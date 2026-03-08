@@ -147,32 +147,9 @@ export const status = {
 };
 
 // ─── Matrix Quotes ─────────────────────────────────────────────
+// Centralized in ../data/matrix-quotes.ts
 
-const MATRIX_QUOTES = [
-  'The Matrix has you...',
-  'Follow the white rabbit.',
-  'There is no spoon.',
-  'I know kung fu.',
-  'Free your mind.',
-  'Welcome to the real world.',
-  'What is real? How do you define real?',
-  'I can only show you the door. You have to walk through it.',
-  'You take the red pill, you stay in Wonderland.',
-  'Unfortunately, no one can be told what the Matrix is. You have to see it for yourself.',
-  'I know why you are here. I know what you have been doing.',
-  "What you know you can't explain, but you feel it.",
-  "Don't think you are. Know you are.",
-  'Everything that has a beginning has an end.',
-  'The answer is out there. It is looking for you.',
-  'You have been living in a dream world.',
-  'Do not try and bend the spoon. Instead, only try to realize the truth... there is no spoon.',
-  'Choice. The problem is choice.',
-  'To deny our own impulses is to deny the very thing that makes us human.',
-];
-
-export function randomQuote(): string {
-  return MATRIX_QUOTES[Math.floor(Math.random() * MATRIX_QUOTES.length)];
-}
+export { randomQuote } from '../data/matrix-quotes.js';
 
 // ─── Helpers ───────────────────────────────────────────────────
 

@@ -23,3 +23,48 @@ if [ -n "$STAGED" ]; then
 else
   echo "  ● No formattable files staged"
 fi
+
+# 3. Auto-revise README.md based on staged changes
+# Skip if only README.md, docs, or non-code files changed
+CODE_CHANGES=$(git diff --cached --name-only --diff-filter=ACMRD | grep -vE '^(README\.md|docs/|\.husky/)' | grep -E '\.(ts|tsx|js|jsx|json|yaml|yml|css|env)' || true)
+
+if [ -n "$CODE_CHANGES" ]; then
+  echo "  ▓ Checking if README.md needs an update..."
+
+  DIFF=$(git diff --cached --stat && echo "---" && git diff --cached --name-only --diff-filter=ACMRD)
+
+  claude -p "You are maintaining README.md for the neo-agent project.
+
+Here are the staged changes about to be committed:
+
+$DIFF
+
+Current README.md:
+$(cat README.md)
+
+Review the staged changes. If anything in the README is now inaccurate, outdated, or missing based on these changes, output the FULL updated README.md content. Focus on:
+- New/removed commands in package.json
+- New/removed config options in .env.example
+- Changed project structure (new/deleted directories or key files)
+- New features or removed capabilities
+
+If the README is already accurate and no updates are needed, output exactly: NO_CHANGES_NEEDED
+
+Do NOT add commentary — output only the README content or NO_CHANGES_NEEDED." --output-format text > /tmp/neo-readme-update.txt 2>/dev/null
+
+  if [ $? -eq 0 ] && ! grep -q "NO_CHANGES_NEEDED" /tmp/neo-readme-update.txt; then
+    # Sanity check: output should look like a markdown file
+    if head -1 /tmp/neo-readme-update.txt | grep -q "^#"; then
+      cp /tmp/neo-readme-update.txt README.md
+      npx prettier --write README.md 2>/dev/null
+      git add README.md
+      echo "  ▓ README.md auto-revised to match staged changes"
+    fi
+  else
+    echo "  ● README.md is up to date"
+  fi
+
+  rm -f /tmp/neo-readme-update.txt
+else
+  echo "  ● No code changes — skipping README revision"
+fi

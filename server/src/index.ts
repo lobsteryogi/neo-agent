@@ -6,6 +6,7 @@
 
 import 'dotenv/config';
 import express from 'express';
+import { join } from 'path';
 import { closeDb, getDb } from './db/connection.js';
 import {
   MATRIX_DIVIDER,
@@ -37,34 +38,49 @@ async function main(): Promise<void> {
   const app = express();
   app.use(express.json());
 
-  // Health endpoint
-  app.get('/api/health', (_req, res) => {
-    const memUsage = process.memoryUsage();
-    res.json({
-      status: 'operational',
-      uptime: process.uptime(),
-      claude: { responsive: true },
-      memory: {
-        dbSizeMb: 0,
-        ftsEntries: db.prepare('SELECT COUNT(*) as count FROM memories_fts').get() as any,
-        heapUsedMb: Math.round((memUsage.heapUsed / 1024 / 1024) * 100) / 100,
-      },
-      gates: { blockedLast1h: 0 },
-      sync: { behind: false },
-      tools: {},
-    });
+  // Phase 3 — Tool Registry (The Armory)
+  const { ToolRegistry } = await import('./tools/registry.js');
+  const { BrowserTool } = await import('./tools/browser.js');
+  const { SchedulerTool } = await import('./tools/scheduler.js');
+
+  const toolRegistry = new ToolRegistry();
+  toolRegistry.register(new BrowserTool());
+  toolRegistry.register(new SchedulerTool());
+  console.log(status.ok(`Tool registry loaded (${toolRegistry.size} tools)`));
+
+  // Health endpoint (passes tool registry for real health checks)
+  const { healthRoute } = await import('./api/health.js');
+  healthRoute(app, { db, toolRegistry });
+
+  // Core API routes (sessions, audit, messages)
+  const { registerRoutes } = await import('./api/routes.js');
+  registerRoutes(app, db);
+
+  // Tool health endpoint
+  app.get('/api/tools', async (_req, res) => {
+    const health = await toolRegistry.healthCheckAll();
+    res.json(health);
   });
 
-  // Session list
-  app.get('/api/sessions', (_req, res) => {
-    const sessions = db.prepare('SELECT * FROM sessions ORDER BY started_at DESC LIMIT 20').all();
-    res.json(sessions);
+  // Phase 6 — Skills
+  const { SkillRegistry } = await import('./skills/index.js');
+  const skillRegistry = new SkillRegistry();
+  const skillsDir = join(process.cwd(), 'workspace', 'skills');
+  skillRegistry.loadFromDirectory(skillsDir);
+
+  app.get('/api/skills', (_req, res) => {
+    const skills = skillRegistry.getAll().map(({ name, description, tags }) => ({
+      name,
+      description,
+      tags,
+    }));
+    res.json(skills);
   });
 
-  // Audit log
-  app.get('/api/audit', (_req, res) => {
-    const logs = db.prepare('SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 50').all();
-    res.json(logs);
+  app.get('/api/skills/:name', (req, res) => {
+    const skill = skillRegistry.get(req.params.name);
+    if (!skill) return res.status(404).json({ error: 'Skill not found' });
+    res.json(skill);
   });
 
   console.log(status.ok('Express routes loaded'));

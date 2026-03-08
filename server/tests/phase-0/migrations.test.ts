@@ -60,7 +60,7 @@ describe('Phase 0 — Database Migrations', () => {
     expect(() => runMigrations(db)).not.toThrow();
 
     const versions = db.prepare('SELECT version FROM _migrations').all();
-    expect(versions).toHaveLength(1); // Still just 1 migration
+    expect(versions).toHaveLength(2); // v1: initial_schema, v2: chat_sessions
   });
 
   it('creates indexes on messages and audit_log', () => {
