@@ -1,0 +1,35 @@
+{
+  "name": "neo-agent",
+  "version": "0.1.1",
+  "private": true,
+  "description": "A quirky AI agent facing existential crisis in the AI world — powered by Claude Code SDK",
+  "scripts": {
+    "neo:onboard": "pnpm --filter @neo-agent/server run onboard",
+    "neo:start": "pnpm --filter @neo-agent/server run start",
+    "neo:dev": "pnpm --filter @neo-agent/server run dev",
+    "neo:poc": "pnpm --filter @neo-agent/server run poc",
+    "dashboard:dev": "pnpm --filter @neo-agent/dashboard run dev",
+    "test": "pnpm -r run test",
+    "test:server": "pnpm --filter @neo-agent/server run test",
+    "test:dashboard": "pnpm --filter @neo-agent/dashboard run test",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "prettier": "^3.8.1"
+  }
+}

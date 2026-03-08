@@ -1,0 +1,25 @@
+#!/bin/sh
+
+# ░▒▓ NEO-AGENT PRE-COMMIT ▓▒░
+
+# 1. Auto-bump patch version
+node -e "
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+const [major, minor, patch] = pkg.version.split('.').map(Number);
+pkg.version = [major, minor, patch + 1].join('.');
+fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+console.log('  ▓ Version bumped to ' + pkg.version);
+"
+git add package.json
+
+# 2. Prettier — format staged files
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(ts|tsx|js|jsx|json|md|css|html|yaml|yml)$' || true)
+
+if [ -n "$STAGED" ]; then
+  echo "$STAGED" | xargs npx prettier --write --ignore-unknown
+  echo "$STAGED" | xargs git add
+  echo "  ▓ Prettier formatted staged files"
+else
+  echo "  ● No formattable files staged"
+fi

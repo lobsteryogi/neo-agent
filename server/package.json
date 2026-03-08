@@ -1,0 +1,40 @@
+{
+  "name": "@neo-agent/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsup",
+    "onboard": "tsx src/onboard/index.ts",
+    "poc": "tsx src/poc/sdk-test.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.71",
+    "@neo-agent/shared": "workspace:*",
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "latest",
+    "express": "^5.x",
+    "nanoid": "^5.x",
+    "node-cron": "^3.0.3",
+    "ws": "^8.18.0",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@clack/prompts": "^0.9.1",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/ws": "^8.5.13",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
+  }
+}

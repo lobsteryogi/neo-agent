@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.db
+*.db-wal
+*.db-shm
+backups/
+.turbo
+.DS_Store
+server/workspace/
+workspace/
+*.db
