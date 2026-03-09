@@ -99,13 +99,9 @@ if [[ "$PNPM_MAJOR" -lt "$REQUIRED_PNPM_MAJOR" ]]; then
 fi
 ok "pnpm v${PNPM_VERSION}"
 
-# Claude Code CLI (warn, don't block — user might install later)
-if command -v claude &>/dev/null; then
-  ok "Claude Code CLI found"
-else
-  warn "Claude Code CLI not found — you'll need it before running Neo"
-  warn "Install: https://docs.anthropic.com/en/docs/claude-code"
-fi
+# Claude Code CLI
+command -v claude &>/dev/null || fail "Claude Code CLI is required — install: https://docs.anthropic.com/en/docs/claude-code"
+ok "Claude Code CLI found"
 
 # Native build tools (required for better-sqlite3 when no prebuilt binary exists)
 if [[ "$(uname -s)" == "Linux" ]]; then
