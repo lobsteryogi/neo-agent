@@ -29,6 +29,8 @@ import { handleCommand } from './lib/commands.js';
 import {
   buildBanner,
   buildPrompt,
+  fmtCost,
+  fmtTokens,
   isShortFollowup,
   R,
   sessionInfo,
@@ -367,36 +369,19 @@ async function autoCompactIfNeeded(): Promise<void> {
   });
 }
 
-const commandDeps = {
-  sessionMgr,
-  longTermMemory,
-  memorySearch,
-  get routingProfile() {
-    return routingProfile;
-  },
-  setRoutingProfile: (p: RoutingProfile) => {
-    routingProfile = p;
-  },
-  refreshSystemPrompt,
-  rl,
-  compact: runCompact,
-};
+// ─── One-shot model override (/model command) ────────────────
+let modelOverride: import('@neo-agent/shared').ModelTier | null = null;
 
-// ─── Main Loop ────────────────────────────────────────────────
+// ─── Last input for /retry ────────────────────────────────────
+let lastInput = '';
 
-rl.on('line', async (line) => {
-  const input = line.trim();
-  if (!input) {
-    rl.prompt();
-    return;
-  }
+// ─── Cost budget ──────────────────────────────────────────────
+const COST_BUDGET = parseFloat(process.env.NEO_COST_BUDGET ?? '0');
 
-  // Handle slash commands
-  const cmdResult = handleCommand(input, commandDeps);
-  const handled = cmdResult instanceof Promise ? await cmdResult : cmdResult;
-  if (handled) return;
+// ─── Core send function ───────────────────────────────────────
 
-  // ─── Send Message ──────────────────────────────────────────
+async function processInput(input: string): Promise<void> {
+  lastInput = input;
   streaming = true;
   const startTime = Date.now();
   log.debug('Processing input', { length: input.length, sessionId: sessionMgr.current.id });
@@ -411,23 +396,6 @@ rl.on('line', async (line) => {
       sanitizedLength: sanitized.content.length,
       modified: input !== sanitized.content,
     });
-
-    // Loading spinner
-    const spinnerHints = QUOTES.loading;
-    let spinnerIdx = 0;
-    const hint = spinnerHints[Math.floor(Math.random() * spinnerHints.length)];
-    const hintColors = [color.dim, color.dimCyan, color.darkGreen];
-    const hintColor = hintColors[Math.floor(Math.random() * hintColors.length)];
-    const spinner = setInterval(() => {
-      if (!ctx.firstToken) {
-        const frame = getSpinnerFrame(spinnerIdx);
-        process.stdout.write(`\r${frame} ${hintColor(hint)}  `);
-        spinnerIdx++;
-      }
-    }, 80);
-
-    const ctx = createStreamContext();
-    attachStreamHandler(bridge, ctx, spinner);
 
     // Smart routing
     const classification = classifier.classify(sanitized.content, {
@@ -448,12 +416,35 @@ rl.on('line', async (line) => {
       profile: routingProfile,
     });
 
-    if (isShortFollowup(sanitized.content) && sessionMgr.current.lastModelTier) {
+    // Apply one-shot model override (/model <tier>)
+    if (modelOverride) {
+      log.debug('Model override applied', { from: route.selectedModel, to: modelOverride });
+      route.selectedModel = modelOverride;
+      modelOverride = null;
+    } else if (isShortFollowup(sanitized.content) && sessionMgr.current.lastModelTier) {
       log.debug('Short followup detected, reusing model', {
         model: sessionMgr.current.lastModelTier,
       });
       route.selectedModel = sessionMgr.current.lastModelTier;
     }
+
+    // Loading spinner — shows the selected model tier
+    const spinnerHints = QUOTES.loading;
+    let spinnerIdx = 0;
+    const hint = spinnerHints[Math.floor(Math.random() * spinnerHints.length)];
+    const hintColors = [color.dim, color.dimCyan, color.darkGreen];
+    const hintColor = hintColors[Math.floor(Math.random() * hintColors.length)];
+    const modelLabel = color.dim(`[${route.selectedModel}]`);
+    const ctx = createStreamContext();
+    const spinner = setInterval(() => {
+      if (!ctx.firstToken) {
+        const frame = getSpinnerFrame(spinnerIdx);
+        process.stdout.write(`\r${frame} ${modelLabel} ${hintColor(hint)}  `);
+        spinnerIdx++;
+      }
+    }, 80);
+
+    attachStreamHandler(bridge, ctx, spinner);
 
     // Dynamic timeout
     const timeoutMs =
@@ -493,23 +484,17 @@ rl.on('line', async (line) => {
       ],
     };
 
-    // Self-debug: inject recent logs when intent suggests user wants insight into agent behavior
-    // Broad intent detection — no slash command needed
+    // Self-debug intent detection
     const lower = sanitized.content.toLowerCase();
     const isDebugIntent =
-      // Explicit debug requests
       /\b(debug|diagnose|trace|inspect|self-debug)\b/.test(lower) ||
-      // Questions about agent behavior
       /\b(what happened|why did you|what went wrong|how did you|what did you do)\b/.test(lower) ||
-      // Complaints about behavior
       /\b(too slow|took too long|wrong answer|incorrect|you (were|are) wrong|broke|broken|failing)\b/.test(
         lower,
       ) ||
-      // Self-reflection / introspection requests
       /\b(how do you work|your (logs?|pipeline|process|routing|thinking)|show me your|explain your)\b/.test(
         lower,
       ) ||
-      // Troubleshooting patterns
       /\b(something (is )?wrong|not working|didn'?t work|error|issue|problem|bug)\b/.test(lower);
 
     if (isDebugIntent) {
@@ -527,11 +512,10 @@ rl.on('line', async (line) => {
         log.debug('Debug context injected', { logCount: recentLogs.length });
       }
     } else {
-      // Always inject a lightweight summary of the last exchange so the agent has baseline self-awareness
       const lastFew = getRecentLogs(10);
       if (lastFew.length > 0) {
         const summary = lastFew
-          .filter((e) => e.level !== 'debug') // only info/warn/error for the light summary
+          .filter((e) => e.level !== 'debug')
           .map((e) => `[${e.level.toUpperCase()}] [${e.namespace}] ${e.message}`)
           .join('\n');
         if (summary) {
@@ -555,21 +539,40 @@ rl.on('line', async (line) => {
     });
 
     let result = await bridge.run(sanitized.content, runOpts);
-    log.debug('Bridge result', {
-      success: result.success,
-      error: result.error ?? null,
-    });
+    log.debug('Bridge result', { success: result.success, error: result.error ?? null });
 
     // If resume failed, retry as a fresh conversation
     if (!result.success && runOpts.resumeSessionId) {
       log.debug('Resume failed, retrying as fresh conversation');
       bridge.removeAllListeners('stream');
       attachStreamHandler(bridge, ctx, spinner);
-
       delete runOpts.resumeSessionId;
       sessionMgr.current.sdkSessionId = undefined;
       result = await bridge.run(sanitized.content, runOpts);
       log.debug('Fresh retry result', { success: result.success });
+    }
+
+    // Auto-retry on timeout — once, with halved maxTurns
+    const isTimeout =
+      !result.success &&
+      ((result.error ?? '').toLowerCase().includes('timeout') ||
+        (result.message ?? '').toLowerCase().includes('timeout') ||
+        (result.error ?? '').includes('ABORT_SIGNAL'));
+    if (isTimeout) {
+      process.stdout.write(
+        `\r\x1b[K  ${color.amber('⏱')} ${color.dim('Timed out — retrying with shorter budget...')}\n`,
+      );
+      log.debug('Timeout detected, auto-retrying', { originalMaxTurns: runOpts.maxTurns });
+      bridge.removeAllListeners('stream');
+      attachStreamHandler(bridge, ctx, spinner);
+      const retryOpts = {
+        ...runOpts,
+        maxTurns: Math.max(1, Math.ceil((runOpts.maxTurns ?? 10) / 2)),
+        resumeSessionId: undefined,
+      };
+      delete retryOpts.resumeSessionId;
+      result = await bridge.run(sanitized.content, retryOpts);
+      log.debug('Auto-retry result', { success: result.success });
     }
 
     // Clean up
@@ -602,7 +605,6 @@ rl.on('line', async (line) => {
     s.totalCost += ctx.costUsd;
     if (ctx.sdkSessionId) {
       s.sdkSessionId = ctx.sdkSessionId;
-      // Once an SDK session is established, compacted context lives in the conversation
       if (compactedContext) {
         log.debug('Compacted context absorbed into SDK session');
         compactedContext = null;
@@ -624,7 +626,6 @@ rl.on('line', async (line) => {
     // ─── Déjà Vu: Record & Extract ────────────────────────────
     try {
       transcript.record(s.id, 'user', input, ctx.totalInputTokens);
-
       const responseText = ctx.fullResponse || (result.data as any)?.content || '';
       if (responseText) {
         transcript.record(s.id, 'assistant', responseText, ctx.totalOutputTokens);
@@ -636,10 +637,7 @@ rl.on('line', async (line) => {
         longTermMemory.store(entry);
       }
       if (extracted.length > 0) {
-        log.debug('Memories extracted', {
-          count: extracted.length,
-          types: extracted.map((e) => e.type),
-        });
+        log.debug('Memories extracted', { count: extracted.length });
         refreshSystemPrompt();
       }
     } catch (err) {
@@ -648,6 +646,13 @@ rl.on('line', async (line) => {
 
     // Auto-compact if we've hit the turn threshold
     await autoCompactIfNeeded();
+
+    // Cost budget warning
+    if (COST_BUDGET > 0 && s.totalCost > COST_BUDGET) {
+      console.log(
+        `  ${color.amber('⚠')} ${color.yellow(`Session cost ${fmtCost(s.totalCost)} has exceeded budget ${fmtCost(COST_BUDGET)}`)}`,
+      );
+    }
 
     // Print stats line
     console.log(
@@ -672,6 +677,151 @@ rl.on('line', async (line) => {
 
   streaming = false;
   rl.prompt();
+}
+
+// ─── Export transcript to markdown ───────────────────────────
+
+async function exportTranscript(): Promise<void> {
+  const s = sessionMgr.current;
+  const history = transcript.getHistory(s.id, 1000);
+  if (history.length === 0) {
+    console.log();
+    console.log(`  ${color.dim('No transcript to export.')}`);
+    console.log();
+    return;
+  }
+  const date = new Date().toISOString().slice(0, 10);
+  const filename = `${process.env.HOME ?? '.'}/neo-export-${s.id}-${date}.md`;
+  const lines = [
+    `# Neo Session Export`,
+    ``,
+    `**Session:** \`${s.id}\`  `,
+    `**Date:** ${date}  `,
+    `**Turns:** ${s.turns}  `,
+    `**Tokens:** ${fmtTokens(s.totalInputTokens + s.totalOutputTokens)}  `,
+    `**Cost:** ${fmtCost(s.totalCost)}  `,
+    ``,
+    `---`,
+    ``,
+  ];
+  for (const m of history) {
+    lines.push(`## ${m.role === 'user' ? '👤 You' : '🤖 Neo'}`);
+    lines.push(``);
+    lines.push((m as any).content ?? '');
+    lines.push(``);
+  }
+  const { writeFileSync } = await import('fs');
+  writeFileSync(filename, lines.join('\n'));
+  console.log();
+  console.log(`  ${color.green('▓')} Exported → ${color.neonCyan(filename)}`);
+  console.log();
+}
+
+// ─── Command Deps ─────────────────────────────────────────────
+
+const commandDeps = {
+  sessionMgr,
+  longTermMemory,
+  memorySearch,
+  get routingProfile() {
+    return routingProfile;
+  },
+  setRoutingProfile: (p: RoutingProfile) => {
+    routingProfile = p;
+  },
+  refreshSystemPrompt,
+  rl,
+  compact: runCompact,
+  retry: async () => {
+    if (!lastInput) {
+      console.log();
+      console.log(`  ${color.dim('Nothing to retry yet.')}`);
+      console.log();
+      rl.prompt();
+      return;
+    }
+    console.log();
+    console.log(`  ${color.dimCyan('↺')} ${color.dim(`Retrying: "${lastInput.slice(0, 60)}"`)}`);
+    console.log();
+    await processInput(lastInput);
+  },
+  setModelOverride: (m: import('@neo-agent/shared').ModelTier | null) => {
+    modelOverride = m;
+  },
+  exportTranscript,
+  transcript,
+};
+
+// ─── Main Loop ────────────────────────────────────────────────
+
+// Multiline input state
+let pendingLines: string[] = [];
+let inMultilineBlock = false;
+
+rl.on('line', async (line) => {
+  // ── Multiline block mode: """ toggles on/off ───────────────
+  if (line.trim() === '"""') {
+    if (!inMultilineBlock) {
+      inMultilineBlock = true;
+      rl.setPrompt(color.dim('... '));
+      rl.prompt();
+    } else {
+      inMultilineBlock = false;
+      const input = pendingLines.join('\n').trim();
+      pendingLines = [];
+      rl.setPrompt(buildPrompt(sessionMgr.current.id));
+      if (!input) {
+        rl.prompt();
+        return;
+      }
+      const cmdResult = handleCommand(input, commandDeps);
+      const handled = cmdResult instanceof Promise ? await cmdResult : cmdResult;
+      if (!handled) await processInput(input);
+    }
+    return;
+  }
+
+  if (inMultilineBlock) {
+    pendingLines.push(line);
+    rl.prompt();
+    return;
+  }
+
+  // ── Backslash continuation: line ending in \ ───────────────
+  if (line.endsWith('\\')) {
+    pendingLines.push(line.slice(0, -1));
+    rl.setPrompt(color.dim('... '));
+    rl.prompt();
+    return;
+  }
+
+  if (pendingLines.length > 0) {
+    pendingLines.push(line);
+    const input = pendingLines.join('\n').trim();
+    pendingLines = [];
+    rl.setPrompt(buildPrompt(sessionMgr.current.id));
+    if (!input) {
+      rl.prompt();
+      return;
+    }
+    const cmdResult = handleCommand(input, commandDeps);
+    const handled = cmdResult instanceof Promise ? await cmdResult : cmdResult;
+    if (!handled) await processInput(input);
+    return;
+  }
+
+  // ── Normal single-line input ───────────────────────────────
+  const input = line.trim();
+  if (!input) {
+    rl.prompt();
+    return;
+  }
+
+  const cmdResult = handleCommand(input, commandDeps);
+  const handled = cmdResult instanceof Promise ? await cmdResult : cmdResult;
+  if (handled) return;
+
+  await processInput(input);
 });
 
 // ─── Shutdown Handlers ────────────────────────────────────────

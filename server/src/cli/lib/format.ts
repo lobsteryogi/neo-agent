@@ -35,6 +35,9 @@ export function fmtCost(usd: number): string {
   return `$${usd.toFixed(4)}`;
 }
 
+// All current Claude models share the same 200k context window
+const CONTEXT_LIMIT = 200_000;
+
 export function statsLine(
   output: number,
   sessionTotal: number,
@@ -56,7 +59,8 @@ export function statsLine(
   } else if (turns !== undefined && compactThreshold !== undefined) {
     compactTag = ` ${color.dim(`▓${turns}/${compactThreshold}`)}`;
   }
-  return `  ${color.darkGreen('┗━')} ${color.neonCyan(`↓${fmtTokens(output)}`)} ${color.neonYellow(fmtCost(cost))} ${color.dim(`${dur}s`)}  ${color.green(`Σ${fmtTokens(sessionTotal)}`)}${modelTag}${routeTag}${compactTag}`;
+  const ctxGauge = `${color.green(fmtTokens(sessionTotal))}${color.dim(`/${fmtTokens(CONTEXT_LIMIT)}`)}`;
+  return `  ${color.darkGreen('┗━')} ${color.neonCyan(`↓${fmtTokens(output)}`)} ${color.neonYellow(fmtCost(cost))} ${color.dim(`${dur}s`)}  Σ${ctxGauge}${modelTag}${routeTag}${compactTag}`;
 }
 
 export function sessionInfo(s: SessionState): string {

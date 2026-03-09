@@ -102,7 +102,7 @@ export class SessionManager {
         s.totalInputTokens,
         s.totalOutputTokens,
         s.totalCost,
-        null,
+        s.lastModelTier ?? null,
         s.startedAt,
         Date.now(),
       );
@@ -123,6 +123,7 @@ export class SessionManager {
         totalOutputTokens: row.total_output_tokens,
         totalCost: row.total_cost,
         startedAt: row.created_at,
+        lastModelTier: row.last_model ?? undefined,
       });
     }
 

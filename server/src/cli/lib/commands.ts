@@ -6,7 +6,7 @@
  * All /slash command handlers for the chat REPL.
  */
 
-import type { RoutingProfile } from '@neo-agent/shared';
+import type { ModelTier, RoutingProfile } from '@neo-agent/shared';
 import { getCommandsForChannel } from '../../channels/command-registry.js';
 import { getQuote } from '../../data/matrix-quotes.js';
 import type { LongTermMemory, MemorySearch } from '../../memory/index.js';
@@ -32,6 +32,10 @@ export interface CommandDeps {
   refreshSystemPrompt: () => void;
   rl: { setPrompt: (p: string) => void; prompt: () => void };
   compact: () => Promise<void>;
+  retry: () => Promise<void>;
+  setModelOverride: (m: ModelTier | null) => void;
+  exportTranscript: () => Promise<void>;
+  transcript?: unknown; // available for future use
 }
 
 // ─── Handler ──────────────────────────────────────────────────
@@ -281,6 +285,44 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
       console.log();
     }
     rl.prompt();
+    return true;
+  }
+
+  // ─── /retry ───────────────────────────────────────────────
+  if (input === '/retry') {
+    deps.retry().catch(() => undefined);
+    return true;
+  }
+
+  // ─── /model ───────────────────────────────────────────────
+  if (input.startsWith('/model')) {
+    const tier = input.slice(6).trim() as ModelTier;
+    if (!tier) {
+      console.log();
+      console.log(statusIcon.info('Usage: /model <haiku|sonnet|opus>'));
+      console.log(color.dim('    Forces the next message to use that model, then reverts.'));
+      console.log();
+      rl.prompt();
+      return true;
+    }
+    if (!['haiku', 'sonnet', 'opus'].includes(tier)) {
+      console.log();
+      console.log(statusIcon.warn(`Unknown tier "${tier}". Use: haiku, sonnet, opus`));
+      console.log();
+      rl.prompt();
+      return true;
+    }
+    deps.setModelOverride(tier);
+    console.log();
+    console.log(statusIcon.ok(`Next message → ${color.magenta(tier)} ${color.dim('(one-shot)')}`));
+    console.log();
+    rl.prompt();
+    return true;
+  }
+
+  // ─── /export ──────────────────────────────────────────────
+  if (input === '/export') {
+    deps.exportTranscript().finally(() => rl.prompt());
     return true;
   }
 

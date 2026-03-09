@@ -43,6 +43,14 @@ export const COMMANDS: CommandDef[] = [
   },
   { command: '/new', description: 'Fresh session', channels: ['cli', 'telegram'] },
   { command: '/compact', description: 'Compact session context', channels: ['cli', 'telegram'] },
+  { command: '/retry', description: 'Resend last message', channels: ['cli'] },
+  {
+    command: '/model',
+    args: '<haiku|sonnet|opus>',
+    description: 'Force model for next turn only',
+    channels: ['cli'],
+  },
+  { command: '/export', description: 'Export session transcript to markdown', channels: ['cli'] },
   {
     command: '/debug',
     args: '[namespace]',
