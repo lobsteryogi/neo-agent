@@ -107,6 +107,33 @@ else
   warn "Install: https://docs.anthropic.com/en/docs/claude-code"
 fi
 
+# Native build tools (required for better-sqlite3 when no prebuilt binary exists)
+if [[ "$(uname -s)" == "Linux" ]]; then
+  MISSING_TOOLS=()
+  command -v make   &>/dev/null || MISSING_TOOLS+=("make")
+  command -v g++    &>/dev/null || { command -v gcc &>/dev/null || MISSING_TOOLS+=("g++"); }
+  command -v python3 &>/dev/null || MISSING_TOOLS+=("python3")
+
+  if [[ ${#MISSING_TOOLS[@]} -gt 0 ]]; then
+    fail "Native build tools missing: ${MISSING_TOOLS[*]}
+    better-sqlite3 requires compilation tools on Linux.
+    Install them with:
+      Debian/Ubuntu:  sudo apt-get install -y build-essential python3
+      RHEL/CentOS:    sudo yum groupinstall 'Development Tools' && sudo yum install python3
+      Alpine:         sudo apk add build-base python3
+      Fedora:         sudo dnf groupinstall 'Development Tools' && sudo dnf install python3"
+  fi
+  ok "Native build tools (make, g++, python3)"
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+  # macOS: Xcode CLI tools provide make/g++ — just check once
+  if ! xcode-select -p &>/dev/null; then
+    warn "Xcode Command Line Tools not found — may be needed for native modules"
+    warn "Install: xcode-select --install"
+  else
+    ok "Xcode Command Line Tools"
+  fi
+fi
+
 # ─── Clone / Update ──────────────────────────────────────────
 step "Repository"
 
