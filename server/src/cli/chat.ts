@@ -139,7 +139,7 @@ rl.prompt();
 let compactedContext: string | null = null;
 
 const AUTO_COMPACT_TURN_THRESHOLD = parseInt(process.env.NEO_AUTO_COMPACT_TURNS ?? '15', 10);
-const COMPACT_KEEP_RECENT = 10; // keep last N messages verbatim
+const COMPACT_KEEP_RECENT = 20; // keep last N messages verbatim
 
 /**
  * Generate a compacted summary from conversation history.
@@ -152,7 +152,7 @@ async function generateCompactSummary(
 ): Promise<string | null> {
   // Build conversation text — give the summarizer enough to work with
   const conversationText = messagesToCompact
-    .map((m) => `[${m.role}]: ${m.content.slice(0, 3000)}`)
+    .map((m) => `[${m.role}]: ${m.content.slice(0, 10000)}`)
     .join('\n\n');
 
   const compactPrompt = `You are compacting a conversation to reduce context size while preserving all important information.
@@ -180,7 +180,7 @@ A 2-3 sentence overview of what was discussed.
 ## Important Facts
 - Any facts, credentials, names, or specifics that would be needed to continue
 
-Be thorough — aim for ~30% of the original length. Preserve specific details (names, paths, values, error messages) rather than generalizing them away.
+Be thorough — aim for ~60% of the original length. Preserve ALL specific details: names, URLs, paths, values, error messages, topics discussed, tools mentioned. Do NOT generalize or drop anything that was explicitly stated.
 
 <conversation>
 ${conversationText}
