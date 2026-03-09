@@ -45,6 +45,15 @@ const guardrails = new GuardrailPipeline();
 const db = getDb();
 const log = logger('chat');
 
+log.debug('Initializing chat', {
+  workspace: process.env.NEO_WORKSPACE_PATH || './workspace',
+  logLevel: process.env.NEO_LOG_LEVEL || 'info',
+  permissionMode: process.env.NEO_PERMISSION_MODE || 'default',
+  defaultModel: process.env.NEO_DEFAULT_MODEL || 'sonnet',
+  routingProfile: process.env.NEO_ROUTING_PROFILE || 'auto',
+  personality: process.env.NEO_PERSONALITY_INTENSITY || 'moderate',
+});
+
 // ─── Smart Router ─────────────────────────────────────────────
 
 const classifier = new TaskClassifier();
@@ -80,6 +89,11 @@ function refreshSystemPrompt(): void {
 // ─── Sessions ─────────────────────────────────────────────────
 
 const sessionMgr = new SessionManager(db);
+log.debug('Session initialized', {
+  sessionId: sessionMgr.current.id,
+  sdkSessionId: sessionMgr.current.sdkSessionId ?? null,
+  turns: sessionMgr.current.turns,
+});
 
 // ─── REPL Setup ───────────────────────────────────────────────
 
@@ -129,11 +143,17 @@ rl.on('line', async (line) => {
   // ─── Send Message ──────────────────────────────────────────
   streaming = true;
   const startTime = Date.now();
+  log.debug('Processing input', { length: input.length, sessionId: sessionMgr.current.id });
 
   try {
     const sanitized = await guardrails.process({
       content: input,
       sessionKey: sessionMgr.current.id,
+    });
+    log.debug('Guardrails passed', {
+      originalLength: input.length,
+      sanitizedLength: sanitized.content.length,
+      modified: input !== sanitized.content,
     });
 
     // Loading spinner
@@ -157,9 +177,25 @@ rl.on('line', async (line) => {
     const classification = classifier.classify(sanitized.content, {
       tokenCount: sessionMgr.current.totalInputTokens + sessionMgr.current.totalOutputTokens,
     });
+    log.debug('Task classified', {
+      complexity: classification.complexity,
+      tokenEstimate: classification.tokenEstimate,
+      contextNeeds: classification.contextNeeds,
+      precisionRequired: classification.precisionRequired,
+    });
+
     const route = routerEngine.selectModel(classification, routingProfile);
+    log.debug('Route selected', {
+      model: route.selectedModel,
+      score: route.score,
+      maxTurns: route.maxTurns,
+      profile: routingProfile,
+    });
 
     if (isShortFollowup(sanitized.content) && sessionMgr.current.lastModelTier) {
+      log.debug('Short followup detected, reusing model', {
+        model: sessionMgr.current.lastModelTier,
+      });
       route.selectedModel = sessionMgr.current.lastModelTier;
     }
 
@@ -185,18 +221,33 @@ rl.on('line', async (line) => {
     // Resume session if we have a previous SDK session ID
     if (sessionMgr.current.sdkSessionId) {
       runOpts.resumeSessionId = sessionMgr.current.sdkSessionId;
+      log.debug('Resuming SDK session', { sdkSessionId: sessionMgr.current.sdkSessionId });
     }
 
+    log.debug('Executing bridge.run', {
+      model: runOpts.model,
+      maxTurns: runOpts.maxTurns,
+      timeoutMs: runOpts.timeoutMs,
+      permissionMode: runOpts.permissionMode,
+      resuming: !!runOpts.resumeSessionId,
+    });
+
     let result = await bridge.run(sanitized.content, runOpts);
+    log.debug('Bridge result', {
+      success: result.success,
+      error: result.error ?? null,
+    });
 
     // If resume failed, retry as a fresh conversation
     if (!result.success && runOpts.resumeSessionId) {
+      log.debug('Resume failed, retrying as fresh conversation');
       bridge.removeAllListeners('stream');
       attachStreamHandler(bridge, ctx, spinner);
 
       delete runOpts.resumeSessionId;
       sessionMgr.current.sdkSessionId = undefined;
       result = await bridge.run(sanitized.content, runOpts);
+      log.debug('Fresh retry result', { success: result.success });
     }
 
     // Clean up
@@ -230,6 +281,16 @@ rl.on('line', async (line) => {
     if (ctx.sdkSessionId) s.sdkSessionId = ctx.sdkSessionId;
     s.lastModelTier = route.selectedModel;
     sessionMgr.save(s);
+    log.debug('Session updated', {
+      sessionId: s.id,
+      turn: s.turns,
+      inputTokens: ctx.totalInputTokens,
+      outputTokens: ctx.totalOutputTokens,
+      costUsd: ctx.costUsd,
+      durationMs,
+      modelUsed: ctx.modelUsed,
+      sdkSessionId: ctx.sdkSessionId ?? null,
+    });
 
     // ─── Déjà Vu: Record & Extract ────────────────────────────
     try {
@@ -239,12 +300,17 @@ rl.on('line', async (line) => {
       if (responseText) {
         transcript.record(s.id, 'assistant', responseText, ctx.totalOutputTokens);
       }
+      log.debug('Transcript recorded', { sessionId: s.id, responseLength: responseText.length });
 
       const extracted = memoryExtractor.extractFromMessage(input, s.id);
       for (const entry of extracted) {
         longTermMemory.store(entry);
       }
       if (extracted.length > 0) {
+        log.debug('Memories extracted', {
+          count: extracted.length,
+          types: extracted.map((e) => e.type),
+        });
         refreshSystemPrompt();
       }
     } catch (err) {
@@ -265,6 +331,7 @@ rl.on('line', async (line) => {
     console.log();
   } catch (err: any) {
     bridge.removeAllListeners('stream');
+    log.error('Chat error', err);
     console.log(`${R}\n${color.amber('⚠')} ${color.yellow(err.message)}${R}\n`);
   }
 
