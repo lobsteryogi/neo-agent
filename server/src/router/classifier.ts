@@ -8,6 +8,9 @@
  */
 
 import type { TaskClassification } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
+
+const log = logger('classifier');
 
 /** Context passed alongside the raw message content */
 export interface ClassifierContext {
@@ -201,7 +204,7 @@ export class TaskClassifier {
   classify(content: string, context: ClassifierContext): TaskClassification {
     const lower = content.toLowerCase();
 
-    return {
+    const result = {
       complexity: this.scoreComplexity(lower),
       tokenEstimate: this.estimateOutputTokens(lower),
       contextNeeds: this.scoreContextNeeds(context),
@@ -209,6 +212,19 @@ export class TaskClassifier {
       toolUsage: this.detectToolUsage(lower, context),
       speedPriority: this.scoreSpeed(lower),
     };
+
+    log.debug('Classification result', {
+      inputLength: content.length,
+      complexity: result.complexity,
+      tokenEstimate: result.tokenEstimate,
+      contextNeeds: result.contextNeeds,
+      precisionRequired: result.precisionRequired,
+      toolUsage: result.toolUsage,
+      speedPriority: result.speedPriority,
+      sessionTokens: context.tokenCount,
+    });
+
+    return result;
   }
 
   // ── Private scorers ────────────────────────────────────────

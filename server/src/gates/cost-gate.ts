@@ -8,7 +8,10 @@
  */
 
 import type { GateVerdict, InboundMessage, RouteDecision } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
 import type { Gate } from './free-will.js';
+
+const log = logger('gate:cost');
 
 export interface CostGateConfig {
   enabled: boolean;
@@ -27,8 +30,10 @@ export class CostGate implements Gate {
 
   async check(_message: InboundMessage, route: RouteDecision): Promise<GateVerdict> {
     const model = route?.selectedModel;
+    log.debug('Cost check', { model, score: route?.score });
 
     if (model === 'opus') {
+      log.warn('Opus blocked by cost gate', { score: route?.score });
       return {
         blocked: true,
         gate: this.name,

@@ -270,7 +270,16 @@ export function generateClaudeSettings(answers: WizardAnswers, workspacePath: st
 
   const settings = {
     permissions: {
-      allow: ['Read(*)', 'Bash(ls *)', 'Bash(cat *)', 'Bash(grep *)', 'Bash(find *)'],
+      allow: [
+        'Read(*)',
+        'Bash(ls *)',
+        'Bash(cat *)',
+        'Bash(grep *)',
+        'Bash(find *)',
+        'WebSearch(*)',
+        'WebFetch(*)',
+        'Write(*)',
+      ],
       deny: [
         'Bash(rm -rf *)',
         'Bash(sudo *)',

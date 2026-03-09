@@ -8,7 +8,10 @@
  */
 
 import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
 import type { Guardrail } from './redactor.js';
+
+const log = logger('firewall');
 
 interface InjectionPattern {
   regex: RegExp;
@@ -65,7 +68,16 @@ export class Firewall implements Guardrail {
     // Cap at 1.0
     const confidence = Math.min(score, 1.0);
 
+    if (matched.length > 0) {
+      log.debug('Injection scan', {
+        score: confidence.toFixed(2),
+        threshold: this.threshold,
+        matched,
+      });
+    }
+
     if (confidence >= this.threshold) {
+      log.warn('Injection blocked', { score: confidence.toFixed(2), patterns: matched });
       return {
         blocked: true,
         guard: this.name,

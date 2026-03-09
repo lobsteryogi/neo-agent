@@ -15,7 +15,10 @@ import type {
 } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import type { Statement } from 'better-sqlite3';
+import { logger } from '../utils/logger.js';
 import { ROUTING_PROFILES, type ProfileWeights } from './profiles.js';
+
+const log = logger('router');
 
 /** Max turns per complexity tier */
 const TURNS_BY_COMPLEXITY = {
@@ -52,6 +55,23 @@ export class RouterEngine {
         : classification.complexity >= 0.4
           ? TURNS_BY_COMPLEXITY.mid
           : TURNS_BY_COMPLEXITY.low;
+
+    log.debug('Route decision', {
+      profile,
+      score: score.toFixed(4),
+      model: selectedModel,
+      maxTurns,
+      scoreComponents: {
+        complexity: (classification.complexity * weights.complexity).toFixed(3),
+        tokenEstimate: (
+          Math.min(classification.tokenEstimate / 8000, 1) * weights.tokenEstimate
+        ).toFixed(3),
+        contextNeeds: (classification.contextNeeds * weights.contextNeeds).toFixed(3),
+        precision: (classification.precisionRequired * weights.precisionRequired).toFixed(3),
+        toolUsage: ((classification.toolUsage ? 1 : 0) * weights.toolUsage).toFixed(3),
+        speed: (classification.speedPriority * weights.speedPriority).toFixed(3),
+      },
+    });
 
     // Audit Fix S2 — log every routing decision for future calibration
     try {

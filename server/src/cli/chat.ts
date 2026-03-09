@@ -116,6 +116,238 @@ rl.prompt();
 
 // ─── Command Deps ─────────────────────────────────────────────
 
+// ─── Context Compaction ──────────────────────────────────────
+// Compaction summarizes older messages while keeping recent ones verbatim.
+// Result is injected into system prompt until absorbed by the SDK session.
+
+let compactedContext: string | null = null;
+
+const AUTO_COMPACT_TURN_THRESHOLD = parseInt(process.env.NEO_AUTO_COMPACT_TURNS ?? '15', 10);
+const COMPACT_KEEP_RECENT = 10; // keep last N messages verbatim
+
+/**
+ * Generate a compacted summary from conversation history.
+ * @param messagesToCompact - older messages to summarize
+ * @param silent - if true, suppress console output (for auto-compact)
+ */
+async function generateCompactSummary(
+  messagesToCompact: { role: string; content: string }[],
+  silent = false,
+): Promise<string | null> {
+  // Build conversation text — give the summarizer enough to work with
+  const conversationText = messagesToCompact
+    .map((m) => `[${m.role}]: ${m.content.slice(0, 3000)}`)
+    .join('\n\n');
+
+  const compactPrompt = `You are compacting a conversation to reduce context size while preserving all important information.
+
+Produce a structured summary with these sections (skip empty sections):
+
+## Conversation Summary
+A 2-3 sentence overview of what was discussed.
+
+## Key Decisions & Outcomes
+- Bullet each decision, outcome, or conclusion reached
+
+## Technical Context
+- Current project/codebase details established
+- File paths, configurations, or architecture discussed
+- Code changes made or planned
+
+## User Preferences & Style
+- Communication preferences, tool preferences, workflow patterns
+
+## Active Tasks & Open Items
+- What was being worked on
+- Unresolved questions or next steps
+
+## Important Facts
+- Any facts, credentials, names, or specifics that would be needed to continue
+
+Be thorough — aim for ~30% of the original length. Preserve specific details (names, paths, values, error messages) rather than generalizing them away.
+
+<conversation>
+${conversationText}
+</conversation>`;
+
+  try {
+    const result = await bridge.run(compactPrompt, {
+      cwd: WORKSPACE,
+      model: 'sonnet',
+      maxTurns: 1,
+      timeoutMs: 60_000,
+      systemPrompt:
+        'You are a context compaction assistant. Produce structured, detailed summaries that preserve all actionable information. Never omit specific values, paths, or technical details. Output only the summary.',
+    });
+
+    if (!result.success || !result.data) {
+      if (!silent) log.warn('Compaction failed', { error: result.error });
+      return null;
+    }
+
+    const summary =
+      typeof result.data === 'string' ? result.data : ((result.data as any).content ?? '');
+    return summary || null;
+  } catch (err) {
+    log.error('Compaction error', { error: String(err) });
+    return null;
+  }
+}
+
+/**
+ * Manual /compact command — compacts the full conversation.
+ */
+async function runCompact(): Promise<void> {
+  const s = sessionMgr.current;
+  const beforeTokens = s.totalInputTokens + s.totalOutputTokens;
+
+  if (beforeTokens === 0) {
+    console.log();
+    console.log(`  ${color.dim('Nothing to compact — no conversation yet.')}`);
+    console.log();
+    return;
+  }
+
+  const history = transcript.getHistory(s.id, 200);
+  if (history.length === 0) {
+    console.log();
+    console.log(`  ${color.dim('No transcript found to compact.')}`);
+    console.log();
+    return;
+  }
+
+  console.log();
+  process.stdout.write(`  ${color.darkGreen('⚙')} ${color.dim('Compacting context...')}`);
+  log.debug('Manual compact start', {
+    turns: s.turns,
+    tokens: beforeTokens,
+    messageCount: history.length,
+  });
+
+  // Split: summarize older messages, keep recent ones verbatim
+  const keepCount = Math.min(COMPACT_KEEP_RECENT, history.length);
+  const olderMessages = history.slice(0, -keepCount);
+  const recentMessages = history.slice(-keepCount);
+
+  let summary: string | null = null;
+
+  if (olderMessages.length > 0) {
+    // Summarize older portion
+    summary = await generateCompactSummary(olderMessages);
+  }
+
+  // Build the compacted context: summary + recent verbatim
+  const parts: string[] = [];
+
+  if (summary) {
+    parts.push(summary);
+  }
+
+  if (recentMessages.length > 0) {
+    parts.push('\n## Recent Messages (verbatim)\n');
+    for (const m of recentMessages) {
+      const truncated = m.content.length > 3000 ? m.content.slice(0, 3000) + '...' : m.content;
+      parts.push(`**${m.role}**: ${truncated}\n`);
+    }
+  }
+
+  compactedContext = parts.join('\n');
+
+  // Break SDK session — next turn starts fresh with compacted context
+  s.sdkSessionId = undefined;
+  sessionMgr.save(s);
+  refreshSystemPrompt();
+
+  const afterEstimate = Math.ceil(compactedContext.length / 4);
+  process.stdout.write(
+    `\r\x1b[K  ${color.green('▓')} Context compacted  ${color.darkGreen('⚡')}  ${color.dim(`${beforeTokens.toLocaleString()} tokens → ~${afterEstimate.toLocaleString()} token summary`)}\n`,
+  );
+  if (olderMessages.length > 0) {
+    console.log(
+      color.dim(
+        `    ${olderMessages.length} older messages summarized, ${recentMessages.length} recent kept verbatim.`,
+      ),
+    );
+  } else {
+    console.log(
+      color.dim(`    ${recentMessages.length} messages kept verbatim (too few to summarize).`),
+    );
+  }
+  console.log(color.dim('    Next message continues with compacted context.'));
+  console.log();
+
+  log.debug('Manual compact done', {
+    olderSummarized: olderMessages.length,
+    recentKept: recentMessages.length,
+    summaryTokens: afterEstimate,
+    originalTokens: beforeTokens,
+    ratio: ((afterEstimate / beforeTokens) * 100).toFixed(1) + '%',
+  });
+}
+
+/**
+ * Auto-compact: triggered after N turns. Summarizes messages older than
+ * the last COMPACT_KEEP_RECENT, injects summary into context, and breaks
+ * the SDK session to start fresh with reduced tokens.
+ */
+async function autoCompactIfNeeded(): Promise<void> {
+  const s = sessionMgr.current;
+  if (s.turns < AUTO_COMPACT_TURN_THRESHOLD) return;
+  // Only auto-compact on exact threshold hits (every N turns after first trigger)
+  if (s.turns % AUTO_COMPACT_TURN_THRESHOLD !== 0) return;
+
+  const history = transcript.getHistory(s.id, 200);
+  if (history.length <= COMPACT_KEEP_RECENT) return;
+
+  log.debug('Auto-compact triggered', { turns: s.turns, messageCount: history.length });
+  process.stdout.write(`\n  ${color.darkGreen('⚙')} ${color.dim('Auto-compacting context...')}`);
+
+  const olderMessages = history.slice(0, -COMPACT_KEEP_RECENT);
+
+  // If we already have a compacted context, include it as prior context for the summarizer
+  const messagesToSummarize = compactedContext
+    ? [
+        { role: 'system' as string, content: `[Previous summary]:\n${compactedContext}` },
+        ...olderMessages,
+      ]
+    : olderMessages;
+
+  const summary = await generateCompactSummary(messagesToSummarize, true);
+
+  if (!summary) {
+    process.stdout.write(`\r\x1b[K`);
+    log.warn('Auto-compact failed — continuing without compaction');
+    return;
+  }
+
+  const recentMessages = history.slice(-COMPACT_KEEP_RECENT);
+  const parts: string[] = [summary, '\n## Recent Messages (verbatim)\n'];
+  for (const m of recentMessages) {
+    const truncated = m.content.length > 3000 ? m.content.slice(0, 3000) + '...' : m.content;
+    parts.push(`**${m.role}**: ${truncated}\n`);
+  }
+
+  const beforeTokens = s.totalInputTokens + s.totalOutputTokens;
+  compactedContext = parts.join('\n');
+  const afterEstimate = Math.ceil(compactedContext.length / 4);
+
+  // Break SDK session
+  s.sdkSessionId = undefined;
+  sessionMgr.save(s);
+
+  process.stdout.write(
+    `\r\x1b[K  ${color.green('▓')} Auto-compacted  ${color.darkGreen('⚡')}  ${color.dim(`${olderMessages.length} older turns summarized, ${COMPACT_KEEP_RECENT} recent kept`)}\n`,
+  );
+
+  log.debug('Auto-compact done', {
+    olderSummarized: olderMessages.length,
+    recentKept: COMPACT_KEEP_RECENT,
+    summaryTokens: afterEstimate,
+    originalTokens: beforeTokens,
+    ratio: beforeTokens > 0 ? ((afterEstimate / beforeTokens) * 100).toFixed(1) + '%' : 'N/A',
+  });
+}
+
 const commandDeps = {
   sessionMgr,
   longTermMemory,
@@ -128,6 +360,7 @@ const commandDeps = {
   },
   refreshSystemPrompt,
   rl,
+  compact: runCompact,
 };
 
 // ─── Main Loop ────────────────────────────────────────────────
@@ -212,14 +445,33 @@ rl.on('line', async (line) => {
           : 120_000;
 
     const permMode = process.env.NEO_PERMISSION_MODE || 'default';
+
+    // Inject compacted context from /compact into system prompt
+    let effectiveSystemPrompt = systemPrompt;
+    if (compactedContext) {
+      effectiveSystemPrompt += `\n\n## Compacted Context (from previous conversation)\n\nThe conversation was compacted. Below is a summary of the key context from the previous turns. Use this to maintain continuity.\n\n${compactedContext}`;
+      log.debug('Compacted context injected', { summaryLength: compactedContext.length });
+    }
+
     const runOpts: any = {
       cwd: WORKSPACE,
       model: route.selectedModel,
       maxTurns: route.maxTurns ?? 10,
       timeoutMs,
-      systemPrompt,
+      systemPrompt: effectiveSystemPrompt,
       permissionMode: permMode,
       allowDangerouslySkipPermissions: permMode === 'bypassPermissions',
+      allowedTools: [
+        'Read',
+        'Write',
+        'Edit',
+        'Bash',
+        'Glob',
+        'Grep',
+        'WebSearch',
+        'WebFetch',
+        'Agent',
+      ],
     };
 
     // Self-debug: inject recent logs when intent suggests user wants insight into agent behavior
@@ -329,7 +581,14 @@ rl.on('line', async (line) => {
     s.totalInputTokens += ctx.totalInputTokens;
     s.totalOutputTokens += ctx.totalOutputTokens;
     s.totalCost += ctx.costUsd;
-    if (ctx.sdkSessionId) s.sdkSessionId = ctx.sdkSessionId;
+    if (ctx.sdkSessionId) {
+      s.sdkSessionId = ctx.sdkSessionId;
+      // Once an SDK session is established, compacted context lives in the conversation
+      if (compactedContext) {
+        log.debug('Compacted context absorbed into SDK session');
+        compactedContext = null;
+      }
+    }
     s.lastModelTier = route.selectedModel;
     sessionMgr.save(s);
     log.debug('Session updated', {
@@ -367,6 +626,9 @@ rl.on('line', async (line) => {
     } catch (err) {
       log.debug('Memory extraction failed', { error: String(err) });
     }
+
+    // Auto-compact if we've hit the turn threshold
+    await autoCompactIfNeeded();
 
     // Print stats line
     console.log(

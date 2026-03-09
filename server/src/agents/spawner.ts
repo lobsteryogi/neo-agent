@@ -14,7 +14,10 @@ import type {
   SubAgentTask,
 } from '@neo-agent/shared';
 import type { ClaudeBridge } from '../core/claude-bridge.js';
+import { logger } from '../utils/logger.js';
 import { AgentWorkspace, type IsolatedWorkspace } from './workspace.js';
+
+const log = logger('spawner');
 
 export class SubAgentSpawner {
   private workspace: AgentWorkspace;
@@ -29,6 +32,15 @@ export class SubAgentSpawner {
   async spawn(blueprint: AgentBlueprint, task: SubAgentTask): Promise<SubAgentResult> {
     const startTime = Date.now();
     let ws: IsolatedWorkspace | undefined;
+
+    log.debug('Spawning sub-agent', {
+      agent: blueprint.name,
+      taskId: task.id,
+      model: blueprint.model,
+      maxTurns: blueprint.maxTurns,
+      allowedTools: blueprint.allowedTools,
+      promptLength: task.prompt.length,
+    });
 
     try {
       // Create isolated workspace
@@ -57,6 +69,16 @@ export class SubAgentSpawner {
       // Collect artifacts from workspace
       const artifacts = this.workspace.collectArtifacts(ws);
 
+      const durationMs = Date.now() - startTime;
+      log.debug('Sub-agent completed', {
+        agent: blueprint.name,
+        taskId: task.id,
+        success: result.success,
+        durationMs,
+        artifactCount: artifacts?.length ?? 0,
+        error: result.error ?? null,
+      });
+
       return {
         agentName: blueprint.name,
         taskId: task.id,
@@ -64,16 +86,23 @@ export class SubAgentSpawner {
         output: result.data,
         artifacts,
         tokensUsed: undefined, // SDK doesn't expose this directly in ClaudeResult
-        durationMs: Date.now() - startTime,
+        durationMs,
         error: result.error,
       };
     } catch (err) {
+      const durationMs = Date.now() - startTime;
+      log.error('Sub-agent crashed', {
+        agent: blueprint.name,
+        taskId: task.id,
+        durationMs,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return {
         agentName: blueprint.name,
         taskId: task.id,
         success: false,
         output: null,
-        durationMs: Date.now() - startTime,
+        durationMs,
         error: err instanceof Error ? err.message : String(err),
       };
     } finally {

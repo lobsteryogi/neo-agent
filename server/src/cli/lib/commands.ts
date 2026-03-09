@@ -31,6 +31,7 @@ export interface CommandDeps {
   setRoutingProfile: (p: RoutingProfile) => void;
   refreshSystemPrompt: () => void;
   rl: { setPrompt: (p: string) => void; prompt: () => void };
+  compact: () => Promise<void>;
 }
 
 // ─── Handler ──────────────────────────────────────────────────
@@ -243,21 +244,7 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
 
   // ─── /compact ─────────────────────────────────────────────
   if (input === '/compact') {
-    const s = sessionMgr.current;
-    const beforeTokens = s.totalInputTokens + s.totalOutputTokens;
-    s.sdkSessionId = undefined; // break SDK resume chain — clears conversation history
-    s.totalInputTokens = 0;
-    s.totalOutputTokens = 0;
-    sessionMgr.save(s);
-    console.log();
-    console.log(
-      statusIcon.ok(
-        `Context compacted  ⚡  ${color.dim(`${beforeTokens.toLocaleString()} tokens → 0`)}`,
-      ),
-    );
-    console.log(color.dim('    Next message starts a fresh conversation.'));
-    console.log();
-    rl.prompt();
+    deps.compact().finally(() => rl.prompt());
     return true;
   }
 

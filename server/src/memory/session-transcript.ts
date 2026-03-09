@@ -9,17 +9,27 @@
 import type { Message } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
+import { logger } from '../utils/logger.js';
+
+const log = logger('memory:transcript');
 
 export class SessionTranscript {
   constructor(private db: Database.Database) {}
 
   record(sessionId: string, role: string, content: string, tokens?: number): void {
+    const estimatedTokens = tokens ?? this.estimateTokens(content);
     this.db
       .prepare(
         `INSERT INTO messages (id, session_id, role, content, tokens, timestamp)
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run(nanoid(), sessionId, role, content, tokens ?? this.estimateTokens(content), Date.now());
+      .run(nanoid(), sessionId, role, content, estimatedTokens, Date.now());
+    log.debug('Transcript recorded', {
+      sessionId,
+      role,
+      contentLength: content.length,
+      tokens: estimatedTokens,
+    });
   }
 
   getHistory(sessionId: string, limit?: number): Message[] {

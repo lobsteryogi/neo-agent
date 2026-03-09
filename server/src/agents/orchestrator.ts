@@ -24,8 +24,11 @@ import type {
 } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
+import { logger } from '../utils/logger.js';
 import type { AgentRegistry } from './registry.js';
 import type { SubAgentSpawner } from './spawner.js';
+
+const log = logger('orchestrator');
 
 const DEFAULT_CONFIG: AgentConfig = {
   maxConcurrentAgents: 3,
@@ -65,8 +68,17 @@ export class Orchestrator {
     const score = Object.values(signals).filter(Boolean).length;
     const suggestedPattern: OrchestrationPattern = signals.parallel ? 'parallel' : 'sequential';
 
+    const shouldDecompose = score >= this.config.decompositionThreshold;
+    log.debug('Decomposition check', {
+      score,
+      threshold: this.config.decompositionThreshold,
+      shouldDecompose,
+      pattern: suggestedPattern,
+      signals,
+    });
+
     return {
-      shouldDecompose: score >= this.config.decompositionThreshold,
+      shouldDecompose,
       suggestedPattern,
       signals,
     };
@@ -76,6 +88,13 @@ export class Orchestrator {
    * Execute an agent team using its configured orchestration pattern.
    */
   async executeTeam(team: AgentTeam): Promise<AgentTeam> {
+    log.debug('Team execution start', {
+      teamId: team.id,
+      pattern: team.pattern,
+      taskCount: team.tasks.length,
+      tasks: team.tasks.map((t) => ({ id: t.id, blueprint: t.blueprintName })),
+    });
+
     // Persist initial state
     this.persistTeam(team);
 
@@ -102,9 +121,21 @@ export class Orchestrator {
       team.results = results;
       team.status = results.every((r) => r.success) ? 'completed' : 'failed';
       team.completedAt = Date.now();
-    } catch {
+
+      log.debug('Team execution complete', {
+        teamId: team.id,
+        status: team.status,
+        results: results.map((r) => ({
+          agent: r.agentName,
+          success: r.success,
+          durationMs: r.durationMs,
+          error: r.error ?? null,
+        })),
+      });
+    } catch (err) {
       team.status = 'failed';
       team.completedAt = Date.now();
+      log.error('Team execution failed', { teamId: team.id, error: String(err) });
     }
 
     // Persist final state

@@ -8,6 +8,9 @@
  */
 
 import type { GateVerdict, InboundMessage, RouteDecision } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
+
+const log = logger('gate:free-will');
 
 export interface FreeWillConfig {
   enabled: boolean;
@@ -33,14 +36,17 @@ export class FreeWillGate implements Gate {
   async check(message: InboundMessage, route: RouteDecision): Promise<GateVerdict> {
     // Only gate execution actions
     if (!route?.requiresExecution) {
+      log.debug('Skipped (no execution required)');
       return { blocked: false };
     }
 
     const content = (message.content ?? '').toLowerCase();
     if (content.includes(this.phrase)) {
+      log.debug('Approval phrase found');
       return { blocked: false };
     }
 
+    log.warn('Blocked — approval phrase missing', { requiresExecution: true });
     return {
       blocked: true,
       gate: this.name,

@@ -7,7 +7,10 @@
  */
 
 import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
 import type { Guardrail } from './redactor.js';
+
+const log = logger('bouncer');
 
 export interface BouncerConfig {
   maxPerMinute: number;
@@ -48,6 +51,11 @@ export class Bouncer implements Guardrail {
     window.timestamps = window.timestamps.filter((t) => now - t < windowMs);
 
     if (window.timestamps.length >= this.maxPerMinute) {
+      log.warn('Rate limit exceeded', {
+        key,
+        count: window.timestamps.length,
+        maxPerMinute: this.maxPerMinute,
+      });
       return {
         blocked: true,
         guard: this.name,
@@ -57,6 +65,11 @@ export class Bouncer implements Guardrail {
     }
 
     window.timestamps.push(now);
+    log.debug('Rate check passed', {
+      key,
+      count: window.timestamps.length,
+      maxPerMinute: this.maxPerMinute,
+    });
     return { blocked: false };
   }
 

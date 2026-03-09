@@ -10,6 +10,9 @@
 import type { MemoryEntry, MemorySearchResult } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
+import { logger } from '../utils/logger.js';
+
+const log = logger('memory:long-term');
 
 export class LongTermMemory {
   constructor(private db: Database.Database) {}
@@ -32,13 +35,18 @@ export class LongTermMemory {
         Date.now(),
       );
 
-    // FTS5 is auto-synced via triggers — no manual insert needed
+    log.debug('Memory stored', {
+      id,
+      type: entry.type,
+      importance: entry.importance,
+      session: entry.sourceSession,
+    });
     return id;
   }
 
   searchFTS(query: string, limit = 10): MemorySearchResult[] {
     try {
-      return this.db
+      const results = this.db
         .prepare(
           `SELECT m.*, memories_fts.rank as relevance
            FROM memories_fts
@@ -48,8 +56,10 @@ export class LongTermMemory {
            LIMIT ?`,
         )
         .all(query, limit) as MemorySearchResult[];
-    } catch {
-      // FTS5 MATCH can throw on invalid syntax — return empty
+      log.debug('FTS search', { query, resultCount: results.length });
+      return results;
+    } catch (err) {
+      log.warn('FTS search failed', { query, error: String(err) });
       return [];
     }
   }

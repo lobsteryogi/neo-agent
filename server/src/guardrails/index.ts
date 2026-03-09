@@ -11,11 +11,14 @@
  */
 
 import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
 import { Accountant, type AccountantConfig } from './accountant.js';
 import { Bouncer, type BouncerConfig } from './bouncer.js';
 import { Cleaner } from './cleaner.js';
 import { Firewall } from './firewall.js';
 import { Redactor, type Guardrail } from './redactor.js';
+
+const log = logger('guardrails');
 
 export interface GuardrailPipelineConfig {
   bouncer?: BouncerConfig;
@@ -43,6 +46,11 @@ export class GuardrailPipeline {
       const verdict: GuardrailVerdict = await guard.check(current);
 
       if (verdict.blocked) {
+        log.warn('Guard blocked', {
+          guard: guard.name,
+          reason: verdict.reason,
+          confidence: verdict.confidence,
+        });
         const err = new Error(`Blocked by ${guard.name}: ${verdict.reason}`);
         (err as any).guard = guard.name;
         (err as any).verdict = verdict;
@@ -51,7 +59,14 @@ export class GuardrailPipeline {
 
       // If guard produced a sanitized version, use it going forward
       if (verdict.sanitized) {
+        log.debug('Guard sanitized content', {
+          guard: guard.name,
+          originalLength: (message.content ?? '').length,
+          sanitizedLength: (verdict.sanitized.content ?? '').length,
+        });
         current = verdict.sanitized;
+      } else {
+        log.debug('Guard passed', { guard: guard.name, confidence: verdict.confidence ?? null });
       }
     }
 

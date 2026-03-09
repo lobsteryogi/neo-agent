@@ -8,6 +8,9 @@
  */
 
 import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
+
+const log = logger('redactor');
 
 export interface Guardrail {
   name: string;
@@ -44,6 +47,7 @@ export class Redactor implements Guardrail {
     let sanitized = content;
     let modified = false;
 
+    const redacted: string[] = [];
     for (const { regex, label } of PATTERNS) {
       // Reset regex state
       regex.lastIndex = 0;
@@ -51,12 +55,15 @@ export class Redactor implements Guardrail {
         regex.lastIndex = 0;
         sanitized = sanitized.replace(regex, label);
         modified = true;
+        redacted.push(label);
       }
     }
 
     if (!modified) {
       return { blocked: false };
     }
+
+    log.debug('Secrets redacted', { patterns: redacted, originalLength: content.length });
 
     return {
       blocked: false,

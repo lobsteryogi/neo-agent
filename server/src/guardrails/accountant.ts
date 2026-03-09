@@ -8,7 +8,10 @@
  */
 
 import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
 import type { Guardrail } from './redactor.js';
+
+const log = logger('accountant');
 
 export interface AccountantConfig {
   maxTokens: number;
@@ -28,7 +31,16 @@ export class Accountant implements Guardrail {
     const currentTokens = message.currentContextTokens ?? 0;
     const projected = currentTokens + estimatedTokens;
 
+    log.debug('Token budget check', {
+      estimatedTokens,
+      currentTokens,
+      projected,
+      maxTokens: this.maxTokens,
+      utilizationPct: ((projected / this.maxTokens) * 100).toFixed(1),
+    });
+
     if (projected > this.maxTokens) {
+      log.warn('Token budget exceeded', { projected, maxTokens: this.maxTokens });
       return {
         blocked: true,
         guard: this.name,

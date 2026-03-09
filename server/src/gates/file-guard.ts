@@ -8,7 +8,10 @@
  */
 
 import type { GateVerdict, InboundMessage, PlannedAction, RouteDecision } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
 import type { Gate } from './free-will.js';
+
+const log = logger('gate:file-guard');
 
 export interface FileGuardConfig {
   enabled: boolean;
@@ -27,12 +30,17 @@ export class FileGuard implements Gate {
 
   async check(_message: InboundMessage, route: RouteDecision): Promise<GateVerdict> {
     const actions: PlannedAction[] = route?.plannedActions ?? [];
+    log.debug('Checking actions', {
+      actionCount: actions.length,
+      protectedPaths: this.protectedPaths,
+    });
 
     for (const action of actions) {
       // Only block write/delete, not reads
       if (action.type === 'read') continue;
 
       if (action.path && this.isProtected(action.path)) {
+        log.warn('Protected path blocked', { type: action.type, path: action.path });
         return {
           blocked: true,
           gate: this.name,

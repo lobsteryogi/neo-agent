@@ -10,7 +10,10 @@
 import type { FadeCheck, HandoffSnapshot, ModelTier } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
+import { logger } from '../utils/logger.js';
 import { SessionTranscript } from './session-transcript.js';
+
+const log = logger('memory:handoff');
 
 interface HandoffConfig {
   fadeThreshold: number; // 0-1, default 0.85
@@ -42,9 +45,22 @@ export class SessionHandoff {
     const limit = MODEL_LIMITS[session.model] ?? 200_000;
     const ratio = tokens / limit;
 
+    log.debug('Fade check', {
+      sessionId: session.id,
+      tokens,
+      limit,
+      ratio: ratio.toFixed(3),
+      threshold: this.fadeThreshold,
+    });
+
     if (ratio < this.fadeThreshold) {
       return { fading: false, ratio };
     }
+
+    log.warn('Fade triggered — capturing snapshot', {
+      sessionId: session.id,
+      ratio: ratio.toFixed(3),
+    });
 
     // Capture Red Pill Moment
     const snapshot = this.captureSnapshot(session);

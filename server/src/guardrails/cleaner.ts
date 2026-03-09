@@ -8,7 +8,10 @@
  */
 
 import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
 import type { Guardrail } from './redactor.js';
+
+const log = logger('cleaner');
 
 const DANGEROUS_PATTERNS: Array<{ regex: RegExp; replacement: string; tag: string }> = [
   // Shell command substitution
@@ -31,18 +34,25 @@ export class Cleaner implements Guardrail {
     let cleaned = content;
     let modified = false;
 
-    for (const { regex, replacement } of DANGEROUS_PATTERNS) {
+    const cleaned_tags: string[] = [];
+    for (const { regex, replacement, tag } of DANGEROUS_PATTERNS) {
       regex.lastIndex = 0;
       if (regex.test(cleaned)) {
         regex.lastIndex = 0;
         cleaned = cleaned.replace(regex, replacement);
         modified = true;
+        cleaned_tags.push(tag);
       }
     }
 
     if (!modified) {
       return { blocked: false };
     }
+
+    log.debug('Dangerous patterns cleaned', {
+      patterns: cleaned_tags,
+      originalLength: content.length,
+    });
 
     return {
       blocked: false,

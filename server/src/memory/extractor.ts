@@ -8,6 +8,9 @@
  */
 
 import type { MemoryEntry, MemoryType } from '@neo-agent/shared';
+import { logger } from '../utils/logger.js';
+
+const log = logger('memory:extractor');
 
 interface ExtractionPattern {
   type: MemoryType;
@@ -69,6 +72,14 @@ export class MemoryExtractor {
           sourceSession: sessionId,
         });
       }
+    }
+
+    if (entries.length > 0) {
+      log.debug('Extracted memories', {
+        count: entries.length,
+        types: entries.map((e) => e.type),
+        importance: entries.map((e) => e.importance),
+      });
     }
 
     return entries;
