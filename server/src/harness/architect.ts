@@ -7,15 +7,17 @@
  * non-empty, valid encoding, no binary garbage.
  */
 
+import type { HarnessResponse, Session } from '@neo-agent/shared';
+
 export interface HarnessWrapper {
   name: string;
-  process(response: any, session?: any): Promise<any>;
+  process(response: HarnessResponse, session?: Session): Promise<HarnessResponse>;
 }
 
 export class Architect implements HarnessWrapper {
   readonly name = 'Architect';
 
-  async process(response: any): Promise<any> {
+  async process(response: HarnessResponse): Promise<HarnessResponse> {
     if (!response) {
       throw new Error('Architect: empty response from Claude');
     }
@@ -38,7 +40,7 @@ export class Architect implements HarnessWrapper {
     return { ...response, validatedContent: content };
   }
 
-  private extractContent(response: any): string {
+  private extractContent(response: HarnessResponse): string {
     if (typeof response === 'string') return response;
     if (response.data?.content) return String(response.data.content);
     if (response.data?.result) return String(response.data.result);

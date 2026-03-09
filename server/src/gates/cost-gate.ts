@@ -7,7 +7,7 @@
  * Blocks when routing indicates an expensive model (opus).
  */
 
-import type { GateVerdict } from '@neo-agent/shared';
+import type { GateVerdict, InboundMessage, RouteDecision } from '@neo-agent/shared';
 import type { Gate } from './free-will.js';
 
 export interface CostGateConfig {
@@ -25,7 +25,7 @@ export class CostGate implements Gate {
     this.warnThreshold = config.warnThreshold ?? 0.7;
   }
 
-  async check(_message: any, route: any): Promise<GateVerdict> {
+  async check(_message: InboundMessage, route: RouteDecision): Promise<GateVerdict> {
     const model = route?.selectedModel;
 
     if (model === 'opus') {

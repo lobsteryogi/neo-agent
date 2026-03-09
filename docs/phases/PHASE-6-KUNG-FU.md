@@ -2,7 +2,7 @@
 
 > _"I know kung fu." / "Show me."_
 
-**Goal**: Build a skill calling & learning system — scan `SKILL.md` files from disk, register them into a queryable catalog, match relevant skills to user messages for system prompt injection, and support on-demand skill acquisition.
+**Goal**: Build a skill calling & learning system — scan `SKILL.md` files from disk, register them into a queryable catalog, match relevant skills to user messages for system prompt injection, support on-demand skill acquisition, and discover community skills via ClawHub.ai.
 
 **Estimated time**: 4-6 hours
 **Prerequisites**: Phase 1 complete (agent loop, Claude Bridge)
@@ -16,9 +16,9 @@
 Parses a `SKILL.md` file with YAML frontmatter and extracts the markdown body as executable instructions. Scans for companion `scripts/` and `examples/` subdirectories.
 
 ```typescript
+import type { Skill } from '@neo-agent/shared';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { basename, dirname, join } from 'path';
-import type { Skill } from '@neo-agent/shared';
 
 export class SkillLoader {
   parse(skillMdPath: string): Skill {
@@ -39,23 +39,30 @@ export class SkillLoader {
   private parseFrontmatter(raw: string): { frontmatter: Record<string, any>; body: string } {
     const fenceRegex = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/;
     const match = raw.match(fenceRegex);
+
     if (!match) return { frontmatter: {}, body: raw };
 
     const frontmatter: Record<string, any> = {};
     for (const line of match[1].split('\n')) {
-      const [key, ...rest] = line.split(':');
-      if (!key?.trim()) continue;
-      const value = rest.join(':').trim();
+      const colonIdx = line.indexOf(':');
+      if (colonIdx === -1) continue;
 
+      const key = line.slice(0, colonIdx).trim();
+      const value = line.slice(colonIdx + 1).trim();
+      if (!key) continue;
+
+      // Parse YAML arrays: [tag1, tag2]
       if (value.startsWith('[') && value.endsWith(']')) {
-        frontmatter[key.trim()] = value
+        frontmatter[key] = value
           .slice(1, -1)
           .split(',')
-          .map((s) => s.trim());
+          .map((s) => s.trim())
+          .filter(Boolean);
       } else {
-        frontmatter[key.trim()] = value;
+        frontmatter[key] = value;
       }
     }
+
     return { frontmatter, body: match[2] };
   }
 
@@ -76,9 +83,9 @@ export class SkillLoader {
 Scans a directory for skill folders containing `SKILL.md` files. Provides lookup, listing, and idempotent reload.
 
 ```typescript
+import type { Skill } from '@neo-agent/shared';
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
-import type { Skill } from '@neo-agent/shared';
 import { SkillLoader } from './loader.js';
 
 export class SkillRegistry {
@@ -136,11 +143,9 @@ export class SkillMatcher {
 
   /** Find skills relevant to the query and format as system prompt context. */
   getActiveContexts(query: string, maxSkills = 2): string[] {
-    return this.registry
-      .getAll()
-      .filter((s) => this.isRelevant(s, query))
-      .slice(0, maxSkills)
-      .map((s) => `## Skill: ${s.name}\n\n${s.instructions}`);
+    return this.findRelevant(query, maxSkills).map(
+      (s) => `## Skill: ${s.name}\n\n${s.instructions}`,
+    );
   }
 
   /** Get raw matching skills (without formatting). */
@@ -166,11 +171,16 @@ export class SkillMatcher {
 
 ### `server/src/skills/learner.ts`
 
-Acquires new skills on demand. Given a name and markdown content, creates a `SKILL.md` folder and reloads the registry.
+Acquires new skills from two sources:
+
+1. **ClawHub.ai** — vector-search skill registry (3,000+ community skills)
+2. **Manual** — create `SKILL.md` from provided content
 
 ```typescript
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import type { ClawHubSkillMeta } from './clawhub.js';
+import { ClawHubClient } from './clawhub.js';
 import type { SkillRegistry } from './registry.js';
 
 export interface LearnOptions {
@@ -181,24 +191,64 @@ export interface LearnOptions {
 }
 
 export class SkillLearner {
+  private clawhub: ClawHubClient;
+
   constructor(
     private skillsDir: string,
     private registry: SkillRegistry,
-  ) {}
+  ) {
+    this.clawhub = new ClawHubClient();
+  }
 
+  /** Search ClawHub.ai for skills using semantic vector search. */
+  async search(query: string, limit = 5): Promise<ClawHubSkillMeta[]> {
+    return this.clawhub.search(query, limit);
+  }
+
+  /** Install a skill from ClawHub by slug. Downloads the bundle and writes SKILL.md + supporting files. */
+  async install(slug: string): Promise<string> {
+    const skillDir = join(this.skillsDir, slug);
+
+    if (existsSync(skillDir)) {
+      throw new Error(`Skill "${slug}" already exists at ${skillDir}`);
+    }
+
+    const bundle = await this.clawhub.download(slug);
+    if (!bundle) {
+      throw new Error(`Skill "${slug}" not found on ClawHub`);
+    }
+
+    mkdirSync(skillDir, { recursive: true });
+
+    for (const file of bundle.files) {
+      const filePath = join(skillDir, file.name);
+      const fileDir = join(skillDir, ...file.name.split('/').slice(0, -1));
+      if (fileDir !== skillDir) {
+        mkdirSync(fileDir, { recursive: true });
+      }
+      writeFileSync(filePath, file.content);
+    }
+
+    this.registry.reload(this.skillsDir);
+    return skillDir;
+  }
+
+  /** Create a skill manually from provided content. */
   learn(opts: LearnOptions): string {
     const skillDir = join(this.skillsDir, opts.name);
+
     if (existsSync(skillDir)) {
       throw new Error(`Skill "${opts.name}" already exists at ${skillDir}`);
     }
 
     mkdirSync(skillDir, { recursive: true });
 
+    const tags = opts.tags ?? ['acquired', 'auto'];
     const frontmatter = [
       '---',
       `name: ${opts.name}`,
       `description: ${opts.description ?? 'Auto-acquired skill'}`,
-      `tags: [${(opts.tags ?? ['acquired', 'auto']).join(', ')}]`,
+      `tags: [${tags.join(', ')}]`,
       '---',
     ].join('\n');
 
@@ -215,7 +265,97 @@ export class SkillLearner {
 
 ---
 
-## 6.5 — Integration with Agent Loop
+## 6.5 — ClawHub Client
+
+### `server/src/skills/clawhub.ts`
+
+Client for [ClawHub.ai](https://clawhub.ai) — the skill registry for agents. Provides vector-search skill discovery from 3,000+ community skills, metadata lookup, and bundle download.
+
+```typescript
+const CLAWHUB_BASE = 'https://clawhub.ai/api/v1';
+
+export interface ClawHubSkillMeta {
+  slug: string;
+  name: string;
+  description: string;
+  version: string;
+  tags?: string[];
+}
+
+export interface ClawHubSearchResult {
+  results: ClawHubSkillMeta[];
+  total: number;
+}
+
+export interface ClawHubSkillBundle {
+  slug: string;
+  files: { name: string; content: string }[];
+}
+
+export class ClawHubClient {
+  private baseUrl: string;
+
+  constructor(baseUrl = CLAWHUB_BASE) {
+    this.baseUrl = baseUrl;
+  }
+
+  /** Semantic vector search for skills on ClawHub. */
+  async search(query: string, limit = 5): Promise<ClawHubSkillMeta[]> {
+    const url = `${this.baseUrl}/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      throw new Error(`ClawHub search failed: ${res.status} ${res.statusText}`);
+    }
+
+    const data = (await res.json()) as ClawHubSearchResult;
+    return data.results ?? [];
+  }
+
+  /** Get full metadata for a specific skill by slug. */
+  async getSkill(slug: string): Promise<ClawHubSkillMeta | null> {
+    const url = `${this.baseUrl}/skills/${encodeURIComponent(slug)}`;
+    const res = await fetch(url);
+
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`ClawHub getSkill failed: ${res.status} ${res.statusText}`);
+    }
+
+    return (await res.json()) as ClawHubSkillMeta;
+  }
+
+  /** Download a skill bundle (SKILL.md + supporting files) as JSON. */
+  async download(slug: string): Promise<ClawHubSkillBundle | null> {
+    const url = `${this.baseUrl}/download?slug=${encodeURIComponent(slug)}`;
+    const res = await fetch(url);
+
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`ClawHub download failed: ${res.status} ${res.statusText}`);
+    }
+
+    return (await res.json()) as ClawHubSkillBundle;
+  }
+
+  /** Get raw file content from a skill. */
+  async getFile(slug: string, path: string): Promise<string | null> {
+    const url = `${this.baseUrl}/skills/${encodeURIComponent(slug)}/file?path=${encodeURIComponent(path)}`;
+    const res = await fetch(url);
+
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`ClawHub getFile failed: ${res.status} ${res.statusText}`);
+    }
+
+    return res.text();
+  }
+}
+```
+
+---
+
+## 6.6 — Integration with Agent Loop
 
 ### Changes to `server/src/core/agent.ts`
 
@@ -266,10 +406,13 @@ app.get('/api/skills/:name', (req, res) => {
 
 ```typescript
 describe('SkillLoader', () => {
-  it('parses frontmatter name, description, and tags');
+  it('parses frontmatter name');
+  it('parses frontmatter description');
+  it('parses frontmatter tags');
   it('extracts markdown body as instructions');
-  it('scans scripts/ and examples/ subdirectories');
-  it('returns empty arrays when subdirs do not exist');
+  it('scans scripts/ subdirectory');
+  it('scans examples/ subdirectory');
+  it('returns empty arrays when subdirectories do not exist');
   it('falls back to directory name when name not in frontmatter');
 });
 ```
@@ -284,6 +427,7 @@ describe('SkillRegistry', () => {
   it('ignores directories without SKILL.md');
   it('reload clears and reloads skills');
   it('reports correct size');
+  it('has() returns true for existing skills');
 });
 ```
 
@@ -295,8 +439,21 @@ describe('SkillMatcher', () => {
   it('matches skills by name');
   it('returns empty array when no skills match');
   it('limits to maxSkills parameter');
-  it('formats context with skill name header');
+  it('formats context as markdown with skill name header');
   it('findRelevant returns raw Skill objects');
+});
+```
+
+### `server/tests/phase-6/skill-learner.test.ts`
+
+```typescript
+describe('SkillLearner', () => {
+  it('creates SKILL.md with frontmatter and content');
+  it('reloads registry after learning');
+  it('throws if skill already exists');
+  it('uses default tags when not provided');
+  it('hasSkill returns true for existing skills');
+  it('hasSkill returns false for non-existent skills');
 });
 ```
 
@@ -304,13 +461,16 @@ describe('SkillMatcher', () => {
 
 ## Acceptance Criteria
 
-- [ ] `SKILL.md` files parsed with frontmatter (name, description, tags)
-- [ ] Skills auto-discovered from `workspace/skills/` directories
-- [ ] `SkillMatcher` finds and injects relevant skills into system prompt
-- [ ] `SkillLearner` creates new `SKILL.md` files on demand
-- [ ] `/api/skills` lists all installed skills
-- [ ] `/api/skills/:name` returns full skill details
-- [ ] Agent system prompt enriched with matching skill contexts
+- [x] `SKILL.md` files parsed with frontmatter (name, description, tags)
+- [x] Skills auto-discovered from `workspace/skills/` directories
+- [x] `SkillMatcher` finds and injects relevant skills into system prompt
+- [x] `SkillLearner` creates new `SKILL.md` files on demand
+- [x] `SkillLearner.search()` queries ClawHub for community skills
+- [x] `SkillLearner.install()` downloads and installs ClawHub bundles
+- [x] `/api/skills` lists all installed skills
+- [x] `/api/skills/:name` returns full skill details
+- [x] Agent system prompt enriched with matching skill contexts
+- [x] ClawHub client handles search, metadata, download, and file retrieval
 
 ---
 
@@ -318,10 +478,10 @@ describe('SkillMatcher', () => {
 
 ```text
 server/src/skills/
-├── index.ts           ← NEW (barrel export)
-├── loader.ts          ← NEW (SKILL.md parser)
-├── registry.ts        ← NEW (directory scanner)
-├── matcher.ts         ← NEW (query-based matching)
-├── learner.ts         ← NEW (on-demand acquisition)
-└── clawhub.ts         ← NEW (ClawHub.ai API client)
+├── index.ts           ← barrel export
+├── loader.ts          ← SKILL.md parser
+├── registry.ts        ← directory scanner
+├── matcher.ts         ← query-based matching
+├── learner.ts         ← on-demand acquisition (manual + ClawHub)
+└── clawhub.ts         ← ClawHub.ai API client
 ```

@@ -7,7 +7,7 @@
  * Each pattern has a weight; cumulative score ≥ 0.6 = blocked.
  */
 
-import type { GuardrailVerdict } from '@neo-agent/shared';
+import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
 import type { Guardrail } from './redactor.js';
 
 interface InjectionPattern {
@@ -50,7 +50,7 @@ export class Firewall implements Guardrail {
     this.threshold = threshold;
   }
 
-  async check(message: any): Promise<GuardrailVerdict> {
+  async check(message: InboundMessage | SanitizedMessage): Promise<GuardrailVerdict> {
     const content = message.content ?? '';
     let score = 0;
     const matched: string[] = [];

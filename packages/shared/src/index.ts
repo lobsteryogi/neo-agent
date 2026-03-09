@@ -32,6 +32,25 @@ export interface Message {
   timestamp: number;
 }
 
+// ─── Attachments ──────────────────────────────────────────────
+
+export type AttachmentType = 'voice' | 'image' | 'document' | 'video' | 'audio';
+
+export interface Attachment {
+  id: string;
+  type: AttachmentType;
+  mimeType: string;
+  fileName?: string;
+  fileSize: number;
+  url?: string; // Remote URL (Telegram CDN etc.)
+  localPath?: string; // After download to temp storage
+  duration?: number; // For voice/audio/video (seconds)
+  width?: number; // For images/video
+  height?: number; // For images/video
+  transcription?: string; // Populated after voice transcription
+  analysis?: string; // Populated after image/document analysis
+}
+
 // ─── Inbound ──────────────────────────────────────────────────
 
 export interface InboundMessage {
@@ -42,7 +61,9 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   sessionKey: string;
+  attachments?: Attachment[];
   metadata?: Record<string, unknown>;
+  currentContextTokens?: number;
 }
 
 export interface SanitizedMessage extends InboundMessage {
@@ -95,6 +116,8 @@ export interface RouteDecision {
   classification: TaskClassification;
   allowedTools?: string[];
   maxTurns?: number;
+  requiresExecution?: boolean;
+  plannedActions?: PlannedAction[];
 }
 
 // ─── Claude Bridge ─────────────────────────────────────────────
@@ -103,10 +126,12 @@ export interface ClaudeBridgeOptions {
   cwd: string;
   model?: ModelTier;
   permissionMode?: string;
+  allowDangerouslySkipPermissions?: boolean;
   allowedTools?: string[];
   systemPrompt?: string;
   maxTurns?: number;
   timeoutMs?: number;
+  resumeSessionId?: string;
 }
 
 export interface ClaudeResult {
@@ -114,6 +139,51 @@ export interface ClaudeResult {
   data?: unknown;
   error?: string;
   message?: string;
+}
+
+// ─── SDK Stream Message ────────────────────────────────────────
+
+/** Lightweight type covering the shapes emitted by the Claude Agent SDK stream. */
+export interface SDKStreamMessage {
+  type: 'assistant' | 'system' | 'result' | 'tool_use' | 'tool_result' | string;
+  message?: {
+    model?: string;
+    content?: Array<{ type: string; text?: string; [key: string]: unknown }>;
+    [key: string]: unknown;
+  };
+  session_id?: string;
+  result?: string;
+  modelUsage?: Record<
+    string,
+    {
+      inputTokens?: number;
+      input_tokens?: number;
+      outputTokens?: number;
+      output_tokens?: number;
+      costUSD?: number;
+    }
+  >;
+  [key: string]: unknown;
+}
+
+// ─── Harness Response ──────────────────────────────────────────
+
+/** Response flowing through the harness pipeline (Architect → Simulation → … → Historian). */
+export interface HarnessResponse {
+  content?: string;
+  validatedContent?: string;
+  model?: ModelTier;
+  tokensUsed?: number;
+  data?: {
+    content?: string;
+    result?: string;
+    messages?: SDKStreamMessage[];
+    [key: string]: unknown;
+  };
+  dryRun?: boolean;
+  _deadline?: { maxMs: number; timestamp: number };
+  _persistence?: { maxRetries: number; baseDelayMs: number };
+  [key: string]: unknown;
 }
 
 // ─── Agent Response ────────────────────────────────────────────
@@ -176,6 +246,93 @@ export interface Skill extends SkillMeta {
   examples: string[]; // files in examples/ subdirectory
 }
 
+// ─── Agents (Phase 7) ──────────────────────────────────────────
+
+export interface AgentBlueprint {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  allowedTools?: string[];
+  maxTurns?: number;
+  timeoutMs?: number;
+  model?: ModelTier;
+  workingDir?: string;
+  claudeMd?: string;
+}
+
+export type OrchestrationPattern = 'sequential' | 'parallel' | 'supervisor';
+export type TeamStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface SubAgentTask {
+  id: string;
+  blueprintName: string;
+  prompt: string;
+  dependsOn?: string[];
+  context?: string;
+}
+
+export interface SubAgentResult {
+  agentName: string;
+  taskId: string;
+  success: boolean;
+  output: unknown;
+  artifacts?: AgentArtifact[];
+  tokensUsed?: number;
+  durationMs?: number;
+  error?: string;
+}
+
+export interface AgentArtifact {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  sizeBytes?: number;
+}
+
+export interface AgentTeam {
+  id: string;
+  pattern: OrchestrationPattern;
+  tasks: SubAgentTask[];
+  status: TeamStatus;
+  results: SubAgentResult[];
+  parentSession?: string;
+  createdAt: number;
+  completedAt?: number;
+}
+
+export interface AgentMessage {
+  id: string;
+  teamId: string;
+  fromAgent: string;
+  toAgent: string; // '*' = broadcast
+  type: 'finding' | 'question' | 'update' | 'artifact';
+  content: string;
+  timestamp: number;
+}
+
+export interface SiblingStatus {
+  sessionId: string;
+  task?: string;
+  lockedFiles: string[];
+  startedAt: number;
+}
+
+export interface AgentConfig {
+  maxConcurrentAgents: number;
+  defaultSubAgentTimeout: number;
+  defaultSubAgentMaxTurns: number;
+  agentWorkspaceDir: string;
+  autoDecompose: boolean;
+  decompositionThreshold: number;
+  blueprintsDir: string;
+}
+
+export interface DecomposeDecision {
+  shouldDecompose: boolean;
+  suggestedPattern: OrchestrationPattern;
+  signals: Record<string, boolean>;
+}
+
 // ─── Health ────────────────────────────────────────────────────
 
 export interface ToolHealth {
@@ -187,7 +344,7 @@ export interface HealthStatus {
   status: 'operational' | 'degraded' | 'down';
   uptime: number;
   claude: { responsive: boolean; lastLatencyMs?: number };
-  memory: { dbSizeMb: number; ftsEntries: number };
+  memory: { dbSizeMb: number; heapUsedMb?: number; ftsEntries: number };
   activeSession?: { tokensUsed: number; fadeRisk: number };
   gates: { blockedLast1h: number };
   sync: { lastSyncAt?: string; behind: boolean };

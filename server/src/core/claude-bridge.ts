@@ -7,7 +7,7 @@
  * Streams messages via EventEmitter, enforces AbortController timeout.
  */
 
-import type { ClaudeBridgeOptions, ClaudeResult } from '@neo-agent/shared';
+import type { ClaudeBridgeOptions, ClaudeResult, SDKStreamMessage } from '@neo-agent/shared';
 import { EventEmitter } from 'events';
 
 export class ClaudeBridge extends EventEmitter {
@@ -21,27 +21,29 @@ export class ClaudeBridge extends EventEmitter {
       // Dynamic import to avoid issues if SDK isn't installed
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
-      const queryOpts: any = {
+      const queryOpts = {
         prompt,
         options: {
           cwd: opts.cwd,
+          model: opts.model,
           maxTurns: opts.maxTurns ?? 10,
           abortController: controller,
           systemPrompt: opts.systemPrompt,
           allowedTools: opts.allowedTools,
-        },
+          permissionMode: opts.permissionMode,
+          allowDangerouslySkipPermissions: opts.allowDangerouslySkipPermissions,
+        } as Record<string, unknown>,
       };
 
-      // Support session resume
-      if ((opts as any).sessionId) {
-        queryOpts.options.resume = true;
-        queryOpts.options.sessionId = (opts as any).sessionId;
+      // Support session resume — SDK expects resume = sessionId string
+      if (opts.resumeSessionId) {
+        queryOpts.options.resume = opts.resumeSessionId;
       }
 
-      const conversation = query(queryOpts);
+      const conversation = query(queryOpts as Parameters<typeof query>[0]);
 
       let resultContent = '';
-      const messages: any[] = [];
+      const messages: SDKStreamMessage[] = [];
 
       // Create an abort promise that rejects when the controller fires
       const abortPromise = new Promise<never>((_, reject) => {
@@ -57,7 +59,7 @@ export class ClaudeBridge extends EventEmitter {
           this.emit('token-estimate', message);
 
           if (message.type === 'assistant') {
-            const content = (message as any).message?.content;
+            const content = (message as SDKStreamMessage).message?.content;
             if (Array.isArray(content)) {
               for (const block of content) {
                 if (block.type === 'text') resultContent += block.text;
@@ -66,7 +68,7 @@ export class ClaudeBridge extends EventEmitter {
           }
 
           if (message.type === 'result') {
-            resultContent = (message as any).result ?? resultContent;
+            resultContent = (message as SDKStreamMessage).result ?? resultContent;
           }
         }
       };
@@ -81,8 +83,9 @@ export class ClaudeBridge extends EventEmitter {
           model: opts.model,
         },
       };
-    } catch (err: any) {
-      if (controller.signal.aborted || err?.message === 'ABORT_SIGNAL') {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (controller.signal.aborted || errMsg === 'ABORT_SIGNAL') {
         return {
           success: false,
           error: 'TIMEOUT',
@@ -92,7 +95,7 @@ export class ClaudeBridge extends EventEmitter {
       return {
         success: false,
         error: 'CRASH',
-        message: String(err?.message ?? err),
+        message: errMsg,
       };
     } finally {
       clearTimeout(timeout);

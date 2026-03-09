@@ -145,6 +145,40 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 3,
+    name: 'agent_teams',
+    up: `
+      CREATE TABLE IF NOT EXISTS agent_teams (
+        id TEXT PRIMARY KEY,
+        pattern TEXT NOT NULL CHECK(pattern IN ('sequential', 'parallel', 'supervisor')),
+        agents TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK(status IN ('pending', 'running', 'completed', 'failed')),
+        results TEXT,
+        parent_session TEXT,
+        created_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        FOREIGN KEY (parent_session) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_teams_status ON agent_teams(status);
+      CREATE INDEX IF NOT EXISTS idx_agent_teams_session ON agent_teams(parent_session);
+
+      CREATE TABLE IF NOT EXISTS agent_messages (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        from_agent TEXT NOT NULL,
+        to_agent TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('finding', 'question', 'update', 'artifact')),
+        content TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        FOREIGN KEY (team_id) REFERENCES agent_teams(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_messages_team ON agent_messages(team_id, timestamp);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
@@ -166,12 +200,15 @@ export function runMigrations(db: Database.Database): void {
 
   for (const migration of MIGRATIONS) {
     if (!applied.has(migration.version)) {
-      db.exec(migration.up);
-      db.prepare('INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)').run(
-        migration.version,
-        migration.name,
-        Date.now(),
-      );
+      const runMigration = db.transaction(() => {
+        db.exec(migration.up);
+        db.prepare('INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)').run(
+          migration.version,
+          migration.name,
+          Date.now(),
+        );
+      });
+      runMigration();
       console.log(`  ✅ Migration ${migration.version}: ${migration.name}`);
     }
   }

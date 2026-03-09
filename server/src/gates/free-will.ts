@@ -7,7 +7,7 @@
  * Only applies to messages that require execution (writes, shell, etc.)
  */
 
-import type { GateVerdict } from '@neo-agent/shared';
+import type { GateVerdict, InboundMessage, RouteDecision } from '@neo-agent/shared';
 
 export interface FreeWillConfig {
   enabled: boolean;
@@ -17,7 +17,7 @@ export interface FreeWillConfig {
 export interface Gate {
   name: string;
   enabled: boolean;
-  check(message: any, route: any): Promise<GateVerdict>;
+  check(message: InboundMessage, route: RouteDecision): Promise<GateVerdict>;
 }
 
 export class FreeWillGate implements Gate {
@@ -30,7 +30,7 @@ export class FreeWillGate implements Gate {
     this.phrase = config.approvalPhrase.toLowerCase();
   }
 
-  async check(message: any, route: any): Promise<GateVerdict> {
+  async check(message: InboundMessage, route: RouteDecision): Promise<GateVerdict> {
     // Only gate execution actions
     if (!route?.requiresExecution) {
       return { blocked: false };

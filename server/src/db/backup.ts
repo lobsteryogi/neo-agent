@@ -9,6 +9,9 @@
 import type Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { logger } from '../utils/logger.js';
+
+const log = logger('backup');
 
 export function runBackup(db: Database.Database, backupDir: string): Promise<string> {
   if (!existsSync(backupDir)) {
@@ -36,8 +39,8 @@ export function cleanOldBackups(backupDir: string, keep: number): void {
   for (const file of files.slice(keep)) {
     try {
       unlinkSync(join(backupDir, file));
-    } catch {
-      // Ignore cleanup errors
+    } catch (err) {
+      log.warn('Failed to clean old backup', { file, error: String(err) });
     }
   }
 }

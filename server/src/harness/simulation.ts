@@ -8,6 +8,7 @@
  * When enabled, Claude's actions are described but not applied.
  */
 
+import type { HarnessResponse } from '@neo-agent/shared';
 import type { HarnessWrapper } from './architect.js';
 
 export class Simulation implements HarnessWrapper {
@@ -18,7 +19,7 @@ export class Simulation implements HarnessWrapper {
     this.dryRun = dryRun;
   }
 
-  async process(response: any): Promise<any> {
+  async process(response: HarnessResponse): Promise<HarnessResponse> {
     if (!this.dryRun) return response;
 
     return {

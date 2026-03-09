@@ -9,4 +9,3 @@ backups/
 .DS_Store
 server/workspace/
 workspace/
-*.db

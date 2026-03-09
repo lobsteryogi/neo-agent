@@ -6,7 +6,7 @@
  * Per-session rate limiter. Blocks rapid-fire message flooding.
  */
 
-import type { GuardrailVerdict } from '@neo-agent/shared';
+import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
 import type { Guardrail } from './redactor.js';
 
 export interface BouncerConfig {
@@ -21,15 +21,22 @@ export class Bouncer implements Guardrail {
   readonly name = 'Bouncer';
   private maxPerMinute: number;
   private windows = new Map<string, RateWindow>();
+  private lastPrune = Date.now();
 
   constructor(config: BouncerConfig = { maxPerMinute: 20 }) {
     this.maxPerMinute = config.maxPerMinute;
   }
 
-  async check(message: any): Promise<GuardrailVerdict> {
+  async check(message: InboundMessage | SanitizedMessage): Promise<GuardrailVerdict> {
     const key = message.sessionKey ?? 'global';
     const now = Date.now();
     const windowMs = 60_000;
+
+    // Periodically prune stale entries to prevent unbounded map growth
+    if (now - this.lastPrune > 120_000) {
+      this.pruneStaleWindows(now, windowMs);
+      this.lastPrune = now;
+    }
 
     let window = this.windows.get(key);
     if (!window) {
@@ -51,5 +58,14 @@ export class Bouncer implements Guardrail {
 
     window.timestamps.push(now);
     return { blocked: false };
+  }
+
+  private pruneStaleWindows(now: number, windowMs: number): void {
+    for (const [key, window] of this.windows) {
+      const latest = window.timestamps[window.timestamps.length - 1] ?? 0;
+      if (now - latest > windowMs * 2) {
+        this.windows.delete(key);
+      }
+    }
   }
 }

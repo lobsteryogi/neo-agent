@@ -6,6 +6,7 @@
  * Retries transient errors with exponential backoff (3 attempts).
  */
 
+import type { HarnessResponse } from '@neo-agent/shared';
 import type { HarnessWrapper } from './architect.js';
 
 export class PersistenceProtocol implements HarnessWrapper {
@@ -18,7 +19,7 @@ export class PersistenceProtocol implements HarnessWrapper {
     this.baseDelayMs = baseDelayMs;
   }
 
-  async process(response: any): Promise<any> {
+  async process(response: HarnessResponse): Promise<HarnessResponse> {
     // PersistenceProtocol wraps the save/delivery step, not the response itself.
     // It attaches retry metadata to the response for downstream use.
     return {

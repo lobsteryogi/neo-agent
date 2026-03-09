@@ -3,18 +3,20 @@
  *
  * "I know why you're here, Neo. I know what you've been doing."
  *
- * The main orchestrator — 9-step pipeline:
- * guardrails → session → context → route → gate → execute → harness → memory → deliver
- *
- * Memory and Router are stubbed for Phase 1 (built in Phase 2 & 3).
+ * The main orchestrator — 10-step pipeline:
+ * media → guardrails → session → context → route → gate → execute → harness → memory → deliver
  */
 
 import type { AgentResponse, InboundMessage, NeoConfig } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import { join } from 'path';
+import { Orchestrator } from '../agents/orchestrator.js';
+import { AgentRegistry } from '../agents/registry.js';
+import { SubAgentSpawner } from '../agents/spawner.js';
 import { GateManager } from '../gates/index.js';
 import { GuardrailPipeline } from '../guardrails/index.js';
 import { HarnessPipeline } from '../harness/index.js';
+import { MediaProcessor, type MediaConfig } from '../media/media-processor.js';
 import { TaskClassifier, type ClassifierContext } from '../router/classifier.js';
 import { RouterEngine } from '../router/engine.js';
 import { SkillMatcher } from '../skills/matcher.js';
@@ -37,6 +39,9 @@ export class NeoAgent {
   private router: RouterEngine;
   private skillRegistry: SkillRegistry;
   private skillMatcher: SkillMatcher;
+  private mediaProcessor: MediaProcessor | null;
+  private agentRegistry: AgentRegistry;
+  private orchestrator: Orchestrator;
 
   constructor(db: Database.Database, config: NeoConfig) {
     this.config = config;
@@ -64,6 +69,25 @@ export class NeoAgent {
     this.skillRegistry = new SkillRegistry();
     this.skillRegistry.loadFromDirectory(join(config.workspacePath, 'skills'));
     this.skillMatcher = new SkillMatcher(this.skillRegistry);
+
+    // Phase 7 — The Ones: Sub-agent orchestration
+    this.agentRegistry = new AgentRegistry();
+    this.agentRegistry.loadFromDirectory(join(config.workspacePath, 'agents'));
+    const spawner = new SubAgentSpawner(this.bridge, '/tmp/neo-agents');
+    this.orchestrator = new Orchestrator(spawner, this.agentRegistry, db);
+
+    // Phase 5 — Phone Lines: Media processing (optional — needs GROQ_API_KEY)
+    const groqKey = process.env.GROQ_API_KEY;
+    this.mediaProcessor = groqKey
+      ? new MediaProcessor({
+          groqApiKey: groqKey,
+          maxVoiceDurationSeconds: 300,
+          maxImageSizeMb: 10,
+          maxDocumentSizeMb: 25,
+          tempDir: '/tmp/neo-media',
+          cleanupAfterMinutes: 30,
+        })
+      : null;
   }
 
   async handleMessage(message: InboundMessage): Promise<AgentResponse> {
@@ -77,8 +101,11 @@ export class NeoAgent {
   }
 
   private async _executeLoop(message: InboundMessage): Promise<AgentResponse> {
+    // 0. Media processing (voice → text, image → analysis, document → text)
+    const enriched = this.mediaProcessor ? await this.mediaProcessor.process(message) : message;
+
     // 1. Guardrails
-    const sanitized = await this.guardrails.process(message);
+    const sanitized = await this.guardrails.process(enriched);
 
     // 2. Session
     const session = this.sessions.resolveOrCreate(
@@ -97,6 +124,27 @@ export class NeoAgent {
     };
     const classification = this.classifier.classify(sanitized.content, context);
     const route = this.router.selectModel(classification, this.config.routingProfile);
+
+    // 4b. Decomposition check — delegate to sub-agents if complex (Phase 7)
+    const decompose = this.orchestrator.shouldDecompose(sanitized);
+    if (decompose.shouldDecompose) {
+      const team = this.orchestrator.createTeam(
+        decompose.suggestedPattern,
+        [{ id: `task-${Date.now()}`, blueprintName: 'planner', prompt: sanitized.content }],
+        session.id,
+      );
+      const completedTeam = await this.orchestrator.executeTeam(team);
+      const output = completedTeam.results
+        .map(
+          (r) =>
+            `[${r.agentName}] ${typeof r.output === 'string' ? r.output : JSON.stringify(r.output)}`,
+        )
+        .join('\n\n');
+      return {
+        content: output || 'Sub-agents completed but produced no output.',
+        model: route.selectedModel,
+      };
+    }
 
     // 5. Gate check (PRE-EXECUTION scope)
     const gateResult = await this.gates.check(sanitized, {
@@ -140,7 +188,7 @@ export class NeoAgent {
   }
 
   private buildSystemPrompt(session: any, query?: string): string {
-    const base = `You are ${this.config.agentName}, a personal AI agent for ${this.config.userName}. Session: ${session.id}`;
+    const base = `You are ${this.config.agentName}, a personal AI agent for ${this.config.userName}. Session: ${session.id}\n\nFormat your responses using markdown when appropriate: **bold** for emphasis, \`code\` for technical terms, code blocks for snippets, - for lists, and [text](url) for links. Keep formatting natural and readable — don't over-format simple replies.`;
 
     if (!query) return base;
 

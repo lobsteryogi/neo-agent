@@ -2,11 +2,11 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "..",
     "paths": {
       "@neo-agent/shared": ["../packages/shared/src"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "../packages/shared/src"],
   "exclude": ["tests"]
 }

@@ -7,7 +7,7 @@
  * Rejects messages that would push context past a hard token cap.
  */
 
-import type { GuardrailVerdict } from '@neo-agent/shared';
+import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
 import type { Guardrail } from './redactor.js';
 
 export interface AccountantConfig {
@@ -22,7 +22,7 @@ export class Accountant implements Guardrail {
     this.maxTokens = config.maxTokens;
   }
 
-  async check(message: any): Promise<GuardrailVerdict> {
+  async check(message: InboundMessage | SanitizedMessage): Promise<GuardrailVerdict> {
     // Rough estimate: 1 token ≈ 4 chars
     const estimatedTokens = Math.ceil((message.content ?? '').length / 4);
     const currentTokens = message.currentContextTokens ?? 0;

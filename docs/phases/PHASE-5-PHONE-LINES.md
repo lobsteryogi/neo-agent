@@ -1,11 +1,11 @@
-# Phase 5 — Phone Lines (Telegram + Channels + Media Intelligence)
+# Phase 5 — Phone Lines (Channels + Media Intelligence)
 
 > _"There is no spoon... but there are notifications."_
 
-**Goal**: Build the multi-channel architecture, Telegram bot integration via Composio, voice note transcription, and file/image understanding pipeline.
+**Goal**: Build the multi-channel adapter architecture (CLI, Web, Telegram), media processing pipeline (voice transcription, image analysis, document extraction), and wire everything through the unified agent loop.
 
-**Estimated time**: 8-12 hours
-**Prerequisites**: Phase 1 complete (agent loop), Phase 3 (Composio integration)
+**Estimated time**: 6–8 hours
+**Prerequisites**: Phase 1 (agent loop), Phase 2 (memory), Phase 3 (router + tools)
 
 ---
 
@@ -13,9 +13,11 @@
 
 ### `server/src/channels/interface.ts`
 
-All channels implement the same adapter interface:
+All channels implement the same adapter interface. This decouples transport from logic — the agent loop never needs to know which channel originated a message.
 
 ```typescript
+import type { AgentResponse, InboundMessage } from '@neo-agent/shared';
+
 export interface ChannelAdapter {
   name: string;
   start(): Promise<void>;
@@ -23,19 +25,13 @@ export interface ChannelAdapter {
   send(sessionId: string, response: AgentResponse): Promise<void>;
   onMessage(handler: (message: InboundMessage) => Promise<void>): void;
 }
+```
 
-export interface InboundMessage {
-  id: string;
-  channelId: string;
-  channel: 'telegram' | 'web' | 'cli';
-  userId: string;
-  content: string;
-  timestamp: number;
-  sessionKey: string; // Derived: channel:userId
-  attachments?: Attachment[]; // Voice notes, files, images
-  metadata?: Record<string, unknown>;
-}
+### Shared Types — `packages/shared/src/index.ts`
 
+Extend `InboundMessage` and add Attachment types:
+
+```typescript
 export type AttachmentType = 'voice' | 'image' | 'document' | 'video' | 'audio';
 
 export interface Attachment {
@@ -43,8 +39,8 @@ export interface Attachment {
   type: AttachmentType;
   mimeType: string;
   fileName?: string;
-  fileSize: number; // bytes
-  url?: string; // Remote URL (Telegram CDN, etc.)
+  fileSize: number;
+  url?: string; // Remote URL (Telegram CDN etc.)
   localPath?: string; // After download to temp storage
   duration?: number; // For voice/audio/video (seconds)
   width?: number; // For images/video
@@ -52,82 +48,124 @@ export interface Attachment {
   transcription?: string; // Populated after voice transcription
   analysis?: string; // Populated after image/document analysis
 }
+
+// Add to InboundMessage:
+export interface InboundMessage {
+  // ... existing fields ...
+  attachments?: Attachment[];
+}
 ```
 
 ---
 
-## 5.2 — Telegram Channel
+## 5.2 — CLI Channel
 
-### `server/src/channels/telegram.ts`
+### `server/src/channels/cli.ts`
 
-Using Composio's Telegram toolkit:
+Wraps the existing `chat.ts` REPL as a `ChannelAdapter`. Supports file path extraction for local media analysis.
 
 ```typescript
-export class TelegramChannel implements ChannelAdapter {
-  name = 'telegram';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as readline from 'readline';
+import type { ChannelAdapter } from './interface.js';
+import type { AgentResponse, Attachment, InboundMessage } from '@neo-agent/shared';
 
-  async start() {
-    const tools = await this.composio.tools.get(this.userId, { toolkits: ['TELEGRAM'] });
-    // Register webhook or polling handler
-    // Map Telegram chat ID → sessionKey
+export class CliChannel implements ChannelAdapter {
+  name = 'cli';
+  private handler!: (message: InboundMessage) => Promise<void>;
+  private rl!: readline.Interface;
+
+  async start(): Promise<void> {
+    this.rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    this.rl.setPrompt('\x1b[32mNeo>\x1b[0m ');
+    this.rl.prompt();
+
+    this.rl.on('line', async (line) => {
+      const content = line.trim();
+      if (!content) {
+        this.rl.prompt();
+        return;
+      }
+
+      const attachments = this.extractFileAttachments(content);
+      await this.handler(this.toInbound(content, attachments));
+      this.rl.prompt();
+    });
   }
 
-  // Bot commands
-  private commands = {
-    '/doit': (msg) => this.agent.approveGate(msg.sessionKey),
-    '/memory': (msg) => this.agent.searchMemory(msg.text),
-    '/sessions': (msg) => this.agent.listSessions(),
-    '/model': (msg) => this.agent.switchModel(msg.text),
-    '/skills': (msg) => this.agent.listSkills(),
-    '/describe': (msg) => this.agent.describeAttachment(msg), // Analyze attached file/image
-    '/neo': (msg) => this.getExistentialQuote(),
-  };
+  async stop(): Promise<void> {
+    this.rl?.close();
+  }
 
-  // Handle incoming media (voice, photo, document)
-  private async handleMedia(telegramMsg: TelegramUpdate): Promise<Attachment[]> {
-    const attachments: Attachment[] = [];
+  async send(_sessionId: string, response: AgentResponse): Promise<void> {
+    process.stdout.write(response.content + '\n');
+  }
 
-    if (telegramMsg.voice || telegramMsg.audio) {
-      const media = telegramMsg.voice ?? telegramMsg.audio!;
-      const file = await this.downloadFile(media.file_id);
-      attachments.push({
-        id: media.file_unique_id,
-        type: telegramMsg.voice ? 'voice' : 'audio',
-        mimeType: media.mime_type ?? 'audio/ogg',
-        fileSize: media.file_size,
-        duration: media.duration,
-        localPath: file.localPath,
-      });
-    }
+  onMessage(handler: (message: InboundMessage) => Promise<void>): void {
+    this.handler = handler;
+  }
 
-    if (telegramMsg.photo) {
-      // Telegram sends multiple sizes — use the largest
-      const largest = telegramMsg.photo[telegramMsg.photo.length - 1];
-      const file = await this.downloadFile(largest.file_id);
-      attachments.push({
-        id: largest.file_unique_id,
-        type: 'image',
-        mimeType: 'image/jpeg',
-        fileSize: largest.file_size,
-        width: largest.width,
-        height: largest.height,
-        localPath: file.localPath,
-      });
-    }
+  private toInbound(content: string, attachments?: Attachment[]): InboundMessage {
+    return {
+      id: crypto.randomUUID(),
+      channelId: 'cli',
+      channel: 'cli',
+      userId: 'local',
+      content,
+      timestamp: Date.now(),
+      sessionKey: 'cli:local',
+      attachments,
+    };
+  }
 
-    if (telegramMsg.document) {
-      const file = await this.downloadFile(telegramMsg.document.file_id);
-      attachments.push({
-        id: telegramMsg.document.file_unique_id,
-        type: 'document',
-        mimeType: telegramMsg.document.mime_type ?? 'application/octet-stream',
-        fileName: telegramMsg.document.file_name,
-        fileSize: telegramMsg.document.file_size,
-        localPath: file.localPath,
-      });
-    }
+  /** Extract file paths from commands like "analyze /path/to/file.pdf". */
+  private extractFileAttachments(line: string): Attachment[] {
+    const fileMatch = line.match(/(?:analyze|transcribe|read|describe)\s+(.+)/i);
+    if (!fileMatch) return [];
 
-    return attachments;
+    const filePath = fileMatch[1].trim();
+    if (!fs.existsSync(filePath)) return [];
+
+    const stat = fs.statSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    return [
+      {
+        id: crypto.randomUUID(),
+        type: this.inferType(ext),
+        mimeType: this.inferMime(ext),
+        fileName: path.basename(filePath),
+        fileSize: stat.size,
+        localPath: filePath,
+      },
+    ];
+  }
+
+  private inferType(ext: string): Attachment['type'] {
+    if (['.ogg', '.mp3', '.wav', '.m4a', '.flac'].includes(ext)) return 'audio';
+    if (['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'].includes(ext)) return 'image';
+    if (['.mp4', '.mov', '.avi', '.mkv'].includes(ext)) return 'video';
+    return 'document';
+  }
+
+  private inferMime(ext: string): string {
+    const map: Record<string, string> = {
+      '.ogg': 'audio/ogg',
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+      '.pdf': 'application/pdf',
+      '.mp4': 'video/mp4',
+      '.mov': 'video/quicktime',
+    };
+    return map[ext] || 'application/octet-stream';
   }
 }
 ```
@@ -138,119 +176,324 @@ export class TelegramChannel implements ChannelAdapter {
 
 ### `server/src/channels/web.ts`
 
+WebSocket channel with token auth, file upload support, and structured JSON protocol.
+
 ```typescript
+import type { IncomingMessage } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import type { ChannelAdapter } from './interface.js';
+import type { AgentResponse, Attachment, InboundMessage } from '@neo-agent/shared';
+
 export class WebChannel implements ChannelAdapter {
   name = 'web';
+  private wss: WebSocketServer;
+  private wsToken: string;
+  private clients = new Map<string, WebSocket>();
+  private handler!: (message: InboundMessage) => Promise<void>;
 
-  start() {
-    this.wss.on('connection', (ws, req) => {
-      // Token auth (Audit Fix M4)
-      const token = new URL(req.url!, `http://${req.headers.host}`).searchParams.get('token');
-      if (token !== this.config.wsToken) return ws.close(4001);
+  constructor(port: number, token: string) {
+    this.wsToken = token;
+    this.wss = new WebSocketServer({ port });
+  }
 
-      ws.on('message', (data) => {
+  async start(): Promise<void> {
+    this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      const token = url.searchParams.get('token');
+      if (token !== this.wsToken) {
+        ws.close(4001, 'Unauthorized');
+        return;
+      }
+
+      const userId = url.searchParams.get('userId') || crypto.randomUUID();
+      this.clients.set(userId, ws);
+
+      ws.on('message', async (data) => {
         const msg = JSON.parse(data.toString());
-        if (msg.type === 'message') this.handler(this.toInbound(msg, ws));
-        if (msg.type === 'upload') this.handleFileUpload(msg, ws); // Handle file/image/voice uploads
-        if (msg.type === 'gate:approve') this.agent.approveGate(msg.sessionKey);
+        if (msg.type === 'message') {
+          const attachments = msg.attachments
+            ? await this.processUploads(msg.attachments)
+            : undefined;
+          await this.handler(this.toInbound(msg.text, userId, attachments));
+        }
       });
+
+      ws.on('close', () => this.clients.delete(userId));
     });
   }
 
-  private async handleFileUpload(msg: any, ws: WebSocket): Promise<void> {
-    const buffer = Buffer.from(msg.data, 'base64');
-    const localPath = await this.saveTempFile(buffer, msg.fileName);
-    const attachment: Attachment = {
+  async stop(): Promise<void> {
+    this.wss.close();
+  }
+
+  async send(sessionId: string, response: AgentResponse): Promise<void> {
+    // Broadcast to all connected clients for now
+    for (const ws of this.clients.values()) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'response', sessionId, ...response }));
+      }
+    }
+  }
+
+  onMessage(handler: (message: InboundMessage) => Promise<void>): void {
+    this.handler = handler;
+  }
+
+  private toInbound(text: string, userId: string, attachments?: Attachment[]): InboundMessage {
+    return {
       id: crypto.randomUUID(),
-      type: this.inferType(msg.mimeType),
-      mimeType: msg.mimeType,
-      fileName: msg.fileName,
-      fileSize: buffer.length,
-      localPath,
+      channelId: 'web',
+      channel: 'web',
+      userId,
+      content: text,
+      timestamp: Date.now(),
+      sessionKey: `web:${userId}`,
+      attachments,
     };
-    const inbound = this.toInbound({ ...msg, attachments: [attachment] }, ws);
-    this.handler(inbound);
+  }
+
+  private async processUploads(
+    raw: Array<{ data: string; fileName: string; mimeType: string }>,
+  ): Promise<Attachment[]> {
+    const { writeFile, mkdtemp } = await import('fs/promises');
+    const { join } = await import('path');
+    const { tmpdir } = await import('os');
+
+    return Promise.all(
+      raw.map(async (file) => {
+        const buffer = Buffer.from(file.data, 'base64');
+        const dir = await mkdtemp(join(tmpdir(), 'neo-'));
+        const localPath = join(dir, file.fileName);
+        await writeFile(localPath, buffer);
+
+        return {
+          id: crypto.randomUUID(),
+          type: this.inferType(file.mimeType) as Attachment['type'],
+          mimeType: file.mimeType,
+          fileName: file.fileName,
+          fileSize: buffer.length,
+          localPath,
+        };
+      }),
+    );
+  }
+
+  private inferType(mimeType: string): string {
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType.startsWith('audio/')) return 'audio';
+    if (mimeType.startsWith('video/')) return 'video';
+    return 'document';
   }
 }
 ```
 
 ---
 
-## 5.4 — CLI Channel
+## 5.4 — Telegram Channel
 
-### `server/src/channels/cli.ts`
+### `server/src/channels/telegram.ts`
 
-Interactive terminal mode using readline:
+Uses **Grammy** (`grammy`) — the same framework as OpenClaw. Handles media downloads, bot commands, and message dispatch with Telegram-native features (reactions, typing indicators).
 
 ```typescript
-export class CliChannel implements ChannelAdapter {
-  name = 'cli';
+import { Bot } from 'grammy';
+import type { ChannelAdapter } from './interface.js';
+import type { AgentResponse, Attachment, InboundMessage } from '@neo-agent/shared';
 
-  async start() {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.setPrompt('\x1b[32mNeo>\x1b[0m '); // Green prompt
-    rl.prompt();
-    rl.on('line', async (line) => {
-      // Support file paths: "analyze /path/to/file.pdf" or "transcribe /path/to/voice.ogg"
-      const attachments = await this.extractFileAttachments(line);
-      this.handler(this.toInbound(line, attachments));
-      rl.prompt();
-    });
+export class TelegramChannel implements ChannelAdapter {
+  name = 'telegram';
+  private bot: Bot;
+  private handler!: (message: InboundMessage) => Promise<void>;
+
+  constructor(private token: string) {
+    this.bot = new Bot(token);
   }
 
-  private async extractFileAttachments(line: string): Promise<Attachment[]> {
-    const fileMatch = line.match(/(?:analyze|transcribe|read|describe)\s+(.+)/i);
-    if (!fileMatch) return [];
+  async start(): Promise<void> {
+    // Text messages
+    this.bot.on('message:text', async (ctx) => {
+      const text = ctx.message.text;
 
-    const filePath = fileMatch[1].trim();
-    if (!fs.existsSync(filePath)) return [];
+      // Handle bot commands
+      if (text.startsWith('/')) {
+        const handled = await this.handleCommand(text, ctx);
+        if (handled) return;
+      }
 
-    const stat = fs.statSync(filePath);
-    const mimeType = mime.lookup(filePath) || 'application/octet-stream';
-    return [
-      {
-        id: crypto.randomUUID(),
-        type: this.inferType(mimeType),
-        mimeType,
-        fileName: path.basename(filePath),
-        fileSize: stat.size,
-        localPath: filePath,
-      },
-    ];
+      await this.handler(this.toInbound(ctx));
+    });
+
+    // Voice messages
+    this.bot.on('message:voice', async (ctx) => {
+      const attachment = await this.downloadMedia(ctx, 'voice');
+      const inbound = this.toInbound(ctx, [attachment]);
+      await this.handler(inbound);
+    });
+
+    // Photos
+    this.bot.on('message:photo', async (ctx) => {
+      const photos = ctx.message.photo!;
+      const largest = photos[photos.length - 1];
+      const attachment = await this.downloadPhoto(ctx, largest);
+      const inbound = this.toInbound(ctx, [attachment]);
+      await this.handler(inbound);
+    });
+
+    // Documents
+    this.bot.on('message:document', async (ctx) => {
+      const attachment = await this.downloadDocument(ctx);
+      const inbound = this.toInbound(ctx, [attachment]);
+      await this.handler(inbound);
+    });
+
+    // Start polling
+    this.bot.start({ onStart: () => console.log('Telegram bot started') });
+  }
+
+  async stop(): Promise<void> {
+    this.bot.stop();
+  }
+
+  async send(_sessionId: string, response: AgentResponse): Promise<void> {
+    // Reply is handled inline via ctx.reply in the message handlers
+    // This method is for push-initiated messages (e.g., scheduled tasks)
+  }
+
+  onMessage(handler: (message: InboundMessage) => Promise<void>): void {
+    this.handler = handler;
+  }
+
+  // ─── Bot Commands ─────────────────────────────────────
+  private commands: Record<string, string> = {
+    '/neo': 'Get an existential quote',
+    '/sessions': 'List active sessions',
+    '/model': 'Switch model tier',
+    '/memory': 'Search memory',
+    '/skills': 'List installed skills',
+    '/help': 'Show available commands',
+  };
+
+  private async handleCommand(text: string, ctx: any): Promise<boolean> {
+    const [cmd, ...args] = text.split(' ');
+    const arg = args.join(' ');
+
+    switch (cmd) {
+      case '/help':
+        await ctx.reply(
+          Object.entries(this.commands)
+            .map(([k, v]) => `${k} — ${v}`)
+            .join('\n'),
+        );
+        return true;
+      case '/neo':
+        await ctx.reply('"There is no spoon." 🥄');
+        return true;
+      // Other commands delegate to the main handler with metadata
+      default:
+        return false;
+    }
+  }
+
+  // ─── Media Download Helpers ───────────────────────────
+  private async downloadMedia(ctx: any, type: 'voice' | 'audio'): Promise<Attachment> {
+    const media = ctx.message.voice ?? ctx.message.audio;
+    const file = await ctx.getFile();
+    const localPath = await this.downloadFile(file.file_path!);
+
+    return {
+      id: media.file_unique_id,
+      type,
+      mimeType: media.mime_type ?? 'audio/ogg',
+      fileSize: media.file_size ?? 0,
+      duration: media.duration,
+      localPath,
+    };
+  }
+
+  private async downloadPhoto(ctx: any, photo: any): Promise<Attachment> {
+    const file = await ctx.getFile();
+    const localPath = await this.downloadFile(file.file_path!);
+
+    return {
+      id: photo.file_unique_id,
+      type: 'image',
+      mimeType: 'image/jpeg',
+      fileSize: photo.file_size ?? 0,
+      width: photo.width,
+      height: photo.height,
+      localPath,
+    };
+  }
+
+  private async downloadDocument(ctx: any): Promise<Attachment> {
+    const doc = ctx.message.document!;
+    const file = await ctx.getFile();
+    const localPath = await this.downloadFile(file.file_path!);
+
+    return {
+      id: doc.file_unique_id,
+      type: 'document',
+      mimeType: doc.mime_type ?? 'application/octet-stream',
+      fileName: doc.file_name,
+      fileSize: doc.file_size ?? 0,
+      localPath,
+    };
+  }
+
+  private async downloadFile(filePath: string): Promise<string> {
+    const { writeFile, mkdtemp } = await import('fs/promises');
+    const { join } = await import('path');
+    const { tmpdir } = await import('os');
+
+    const url = `https://api.telegram.org/file/bot${this.token}/${filePath}`;
+    const res = await fetch(url);
+    const buffer = Buffer.from(await res.arrayBuffer());
+
+    const dir = await mkdtemp(join(tmpdir(), 'neo-tg-'));
+    const localPath = join(dir, filePath.split('/').pop()!);
+    await writeFile(localPath, buffer);
+    return localPath;
+  }
+
+  private toInbound(ctx: any, attachments?: Attachment[]): InboundMessage {
+    const msg = ctx.message;
+    return {
+      id: String(msg.message_id),
+      channelId: String(msg.chat.id),
+      channel: 'telegram',
+      userId: String(msg.from?.id ?? ''),
+      content: msg.text ?? msg.caption ?? '',
+      timestamp: msg.date * 1000,
+      sessionKey: `telegram:${msg.chat.id}`,
+      attachments,
+    };
   }
 }
 ```
 
 ---
 
-## 5.5 — Voice Transcription Pipeline
+## 5.5 — Voice Transcription
 
 > _"I hear you, even through the static."_
 
-### Overview
-
-When a user sends a voice note (Telegram voice message, uploaded audio file, or CLI audio path), the agent transcribes it to text before processing. The transcription is injected as `content` into the `InboundMessage` so the agent loop handles it like any text message.
-
 ### `server/src/media/voice-transcriber.ts`
 
-Uses **Groq Whisper** API (free tier: 20 req/min, Whisper Large v3 Turbo, ~2s latency).
+Uses **Groq Whisper** (free tier: 20 req/min, `whisper-large-v3-turbo`, ~2s latency).
 
 ```typescript
 import { readFile } from 'fs/promises';
-import { execAsync } from '../utils/exec';
 
 export class VoiceTranscriber {
   constructor(private apiKey: string) {}
 
-  async transcribe(attachment: Attachment): Promise<string> {
-    // 1. Convert to WAV if needed (Telegram sends OGG/Opus)
-    const wavPath = await this.convertToWav(attachment.localPath!);
+  async transcribe(localPath: string): Promise<string> {
+    // Convert to WAV if needed (Telegram sends OGG/Opus)
+    const wavPath = await this.convertToWav(localPath);
 
-    // 2. Transcribe via Groq Whisper
     const formData = new FormData();
     formData.append('file', new Blob([await readFile(wavPath)]), 'audio.wav');
     formData.append('model', 'whisper-large-v3-turbo');
-    formData.append('language', 'en'); // Auto-detect if omitted
     formData.append('response_format', 'text');
 
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
@@ -264,6 +507,11 @@ export class VoiceTranscriber {
   }
 
   private async convertToWav(inputPath: string): Promise<string> {
+    if (inputPath.endsWith('.wav')) return inputPath;
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
     const outputPath = inputPath.replace(/\.[^.]+$/, '.wav');
     await execAsync(`ffmpeg -i "${inputPath}" -ar 16000 -ac 1 -f wav "${outputPath}" -y`);
     return outputPath;
@@ -271,97 +519,15 @@ export class VoiceTranscriber {
 }
 ```
 
-### Integration with Agent Loop
-
-Voice transcription is integrated as a middleware step **before** the guardrail pipeline:
-
-```typescript
-// In NeoAgent._executeLoop()
-private async _executeLoop(message: InboundMessage): Promise<AgentResponse> {
-  // 0. Media processing (voice → text, image/file → analysis)
-  const enriched = await this.mediaProcessor.process(message);
-
-  // 1. Guardrails (now with transcribed text)
-  const sanitized = await this.guardrails.process(enriched);
-  // ... rest of the pipeline
-}
-```
-
 ---
 
-## 5.6 — File & Image Understanding Pipeline
+## 5.6 — Vision Analyzer
 
 > _"I can see it... the code is everywhere."_
 
-### Overview
-
-Neo can receive and understand files (PDF, DOCX, CSV, code) and images (screenshots, diagrams, photos) sent through any channel. This uses **Groq Vision** for image analysis and **LlamaParse** for document parsing.
-
-### Architecture
-
-```text
-Attachment received
-       │
-       ├─ Image? ──────────→ Groq Vision API (LLaVA)
-       │                            │
-       │                            └→ analysis text → InboundMessage.attachments[].analysis
-       │
-       ├─ Document? ────────→ LlamaParse API
-       │                            │
-       │                            └→ extracted text → InboundMessage.content (appended)
-       │
-       └─ Code file? ───────→ Direct read → InboundMessage.content (appended)
-```
-
-### `server/src/media/media-processor.ts`
-
-Central orchestrator for all media types:
-
-```typescript
-export class MediaProcessor {
-  private voiceTranscriber: VoiceTranscriber;
-  private visionAnalyzer: VisionAnalyzer;
-  private documentReader: DocumentReader;
-
-  async process(message: InboundMessage): Promise<InboundMessage> {
-    if (!message.attachments?.length) return message;
-
-    const enriched = { ...message };
-    const contentParts: string[] = [message.content];
-
-    for (const attachment of enriched.attachments!) {
-      switch (attachment.type) {
-        case 'voice':
-        case 'audio': {
-          const transcription = await this.voiceTranscriber.transcribe(attachment);
-          attachment.transcription = transcription;
-          contentParts.push(`[Voice message]: ${transcription}`);
-          break;
-        }
-        case 'image': {
-          const analysis = await this.visionAnalyzer.analyze(attachment);
-          attachment.analysis = analysis;
-          contentParts.push(`[Image: ${attachment.fileName ?? 'photo'}]: ${analysis}`);
-          break;
-        }
-        case 'document': {
-          const text = await this.documentReader.extract(attachment);
-          attachment.analysis = text;
-          contentParts.push(`[Document: ${attachment.fileName}]:\n${text}`);
-          break;
-        }
-      }
-    }
-
-    enriched.content = contentParts.filter(Boolean).join('\n\n');
-    return enriched;
-  }
-}
-```
-
 ### `server/src/media/vision-analyzer.ts`
 
-Uses **Groq Vision** API (free tier, `llava-v1.5-7b-4096-preview`).
+Uses **Claude's native vision** (via the existing Claude Bridge) — no separate Groq Vision needed.
 
 ```typescript
 import { readFile } from 'fs/promises';
@@ -369,8 +535,8 @@ import { readFile } from 'fs/promises';
 export class VisionAnalyzer {
   constructor(private apiKey: string) {}
 
-  async analyze(attachment: Attachment, prompt?: string): Promise<string> {
-    const imageBuffer = await readFile(attachment.localPath!);
+  async analyze(localPath: string, mimeType: string, prompt?: string): Promise<string> {
+    const imageBuffer = await readFile(localPath);
     const base64 = imageBuffer.toString('base64');
     const defaultPrompt =
       'Describe this image in detail. If it contains text, code, diagrams, or data — extract and structure them.';
@@ -382,16 +548,13 @@ export class VisionAnalyzer {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llava-v1.5-7b-4096-preview',
+        model: 'llama-3.2-90b-vision-preview',
         messages: [
           {
             role: 'user',
             content: [
               { type: 'text', text: prompt ?? defaultPrompt },
-              {
-                type: 'image_url',
-                image_url: { url: `data:${attachment.mimeType};base64,${base64}` },
-              },
+              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
             ],
           },
         ],
@@ -406,39 +569,38 @@ export class VisionAnalyzer {
 }
 ```
 
+---
+
+## 5.7 — Document Reader
+
 ### `server/src/media/document-reader.ts`
 
-Uses **LlamaParse** API (free tier: 1000 pages/day). Returns structured markdown from PDF, DOCX, PPTX, XLSX. Code/text files are read directly via `fs.readFile`.
+Reads text files directly, PDFs via `pdf-parse`, CSV/TSV with row cap.
 
 ```typescript
-import { LlamaParseReader } from 'llamaindex';
 import { readFile } from 'fs/promises';
 import path from 'path';
 
 export class DocumentReader {
-  constructor(private apiKey: string) {}
-
-  async extract(attachment: Attachment): Promise<string> {
-    const ext = path.extname(attachment.fileName ?? '').toLowerCase();
+  async extract(localPath: string, fileName?: string): Promise<string> {
+    const ext = path.extname(fileName ?? localPath).toLowerCase();
 
     // Code & text files — direct read
     if (this.isTextFile(ext)) {
-      return await readFile(attachment.localPath!, 'utf-8');
+      return readFile(localPath, 'utf-8');
     }
 
-    // PDF, DOCX, PPTX, XLSX — LlamaParse
-    if (this.isDocumentFile(ext)) {
-      const reader = new LlamaParseReader({
-        apiKey: this.apiKey,
-        resultType: 'markdown',
-      });
-      const documents = await reader.loadData(attachment.localPath!);
-      return documents.map((doc) => doc.getText()).join('\n\n');
+    // PDF — pdf-parse (lightweight, no external API)
+    if (ext === '.pdf') {
+      const pdfParse = (await import('pdf-parse')).default;
+      const buffer = await readFile(localPath);
+      const data = await pdfParse(buffer);
+      return data.text;
     }
 
     // CSV/TSV — direct read with row cap
     if (['.csv', '.tsv'].includes(ext)) {
-      const content = await readFile(attachment.localPath!, 'utf-8');
+      const content = await readFile(localPath, 'utf-8');
       const lines = content.split('\n').slice(0, 100);
       return `[CSV Data — ${lines.length} rows]:\n${lines.join('\n')}`;
     }
@@ -467,40 +629,132 @@ export class DocumentReader {
       '.css',
       '.sql',
       '.sh',
-      '.env.example',
+      '.env',
       '.gitignore',
     ].includes(ext);
-  }
-
-  private isDocumentFile(ext: string): boolean {
-    return ['.pdf', '.docx', '.doc', '.pptx', '.xlsx'].includes(ext);
   }
 }
 ```
 
 ---
 
-## 5.7 — Configuration
+## 5.8 — Media Processor (Orchestrator)
 
-### `server/src/config/media.ts`
+### `server/src/media/media-processor.ts`
+
+Central orchestrator. Processes all attachments **before** the guardrail pipeline.
 
 ```typescript
+import type { InboundMessage, Attachment } from '@neo-agent/shared';
+import { VoiceTranscriber } from './voice-transcriber.js';
+import { VisionAnalyzer } from './vision-analyzer.js';
+import { DocumentReader } from './document-reader.js';
+
 export interface MediaConfig {
-  groqApiKey: string; // Groq free tier — 20 req/min (Whisper + Vision)
-  llamaParseApiKey: string; // LlamaParse free tier — 1000 pages/day
-  maxVoiceDurationSeconds: number; // Default: 300 (5 min)
+  groqApiKey: string;
+  maxVoiceDurationSeconds: number; // Default: 300
   maxImageSizeMb: number; // Default: 10
   maxDocumentSizeMb: number; // Default: 25
   tempDir: string; // Default: /tmp/neo-media
   cleanupAfterMinutes: number; // Default: 30
+}
+
+export class MediaProcessor {
+  private voiceTranscriber: VoiceTranscriber;
+  private visionAnalyzer: VisionAnalyzer;
+  private documentReader: DocumentReader;
+
+  constructor(private config: MediaConfig) {
+    this.voiceTranscriber = new VoiceTranscriber(config.groqApiKey);
+    this.visionAnalyzer = new VisionAnalyzer(config.groqApiKey);
+    this.documentReader = new DocumentReader();
+  }
+
+  async process(message: InboundMessage): Promise<InboundMessage> {
+    if (!message.attachments?.length) return message;
+
+    const enriched = { ...message };
+    const contentParts: string[] = message.content ? [message.content] : [];
+
+    for (const attachment of enriched.attachments!) {
+      switch (attachment.type) {
+        case 'voice':
+        case 'audio': {
+          const transcription = await this.voiceTranscriber.transcribe(attachment.localPath!);
+          attachment.transcription = transcription;
+          contentParts.push(`[Voice message]: ${transcription}`);
+          break;
+        }
+        case 'image': {
+          const analysis = await this.visionAnalyzer.analyze(
+            attachment.localPath!,
+            attachment.mimeType,
+          );
+          attachment.analysis = analysis;
+          contentParts.push(`[Image: ${attachment.fileName ?? 'photo'}]: ${analysis}`);
+          break;
+        }
+        case 'document': {
+          const text = await this.documentReader.extract(
+            attachment.localPath!,
+            attachment.fileName,
+          );
+          attachment.analysis = text;
+          contentParts.push(`[Document: ${attachment.fileName}]:\n${text}`);
+          break;
+        }
+      }
+    }
+
+    enriched.content = contentParts.filter(Boolean).join('\n\n');
+    return enriched;
+  }
+}
+```
+
+---
+
+## 5.9 — Integration
+
+### Agent Loop — `server/src/core/agent.ts`
+
+Media processing inserts as step 0, before guardrails:
+
+```typescript
+// In NeoAgent._executeLoop()
+private async _executeLoop(message: InboundMessage): Promise<AgentResponse> {
+  // 0. Media processing (voice → text, image/file → analysis)
+  const enriched = this.mediaProcessor
+    ? await this.mediaProcessor.process(message)
+    : message;
+
+  // 1. Guardrails (now with transcribed text)
+  const sanitized = await this.guardrails.process(enriched);
+  // ... rest of pipeline
+}
+```
+
+### Server Bootstrap — `server/src/index.ts`
+
+```typescript
+// Channel registration
+import { WebChannel } from './channels/web.js';
+import { TelegramChannel } from './channels/telegram.js';
+
+const webChannel = new WebChannel(WS_PORT, WS_TOKEN);
+await webChannel.start();
+
+if (process.env.TELEGRAM_BOT_TOKEN) {
+  const tgChannel = new TelegramChannel(process.env.TELEGRAM_BOT_TOKEN);
+  await tgChannel.start();
 }
 ```
 
 ### Environment Variables
 
 ```env
-GROQ_API_KEY=gsk_...               # Free tier — Whisper transcription + Vision analysis
-LLAMA_PARSE_API_KEY=llx-...        # Free tier — 1000 pages/day document parsing
+GROQ_API_KEY=gsk_...               # Free tier — Whisper + Vision
+TELEGRAM_BOT_TOKEN=                 # Optional — enable Telegram channel
 ```
 
 ---
@@ -510,312 +764,55 @@ LLAMA_PARSE_API_KEY=llx-...        # Free tier — 1000 pages/day document parsi
 ### `server/tests/phase-5/channel-adapter.test.ts`
 
 ```typescript
-import { describe, it, expect, vi } from 'vitest';
-import { TelegramChannel } from '../../src/channels/telegram';
-import { WebChannel } from '../../src/channels/web';
-import { CliChannel } from '../../src/channels/cli';
-
-describe('Channel Adapter Interface', () => {
-  const channels = [
-    new TelegramChannel(mockConfig, mockComposio),
-    new WebChannel(mockConfig, mockWss),
-    new CliChannel(mockConfig),
-  ];
-
-  it('all channels implement start() and stop()', () => {
-    for (const channel of channels) {
-      expect(typeof channel.start).toBe('function');
-      expect(typeof channel.stop).toBe('function');
-    }
-  });
-
-  it('all channels implement send()', () => {
-    for (const channel of channels) {
-      expect(typeof channel.send).toBe('function');
-    }
-  });
-
-  it('all channels have a name property', () => {
-    expect(channels.map((c) => c.name)).toEqual(['telegram', 'web', 'cli']);
-  });
+describe('CliChannel', () => {
+  it('toInbound() creates valid InboundMessage with sessionKey cli:local');
+  it('extractFileAttachments() returns attachment for valid file path');
+  it('extractFileAttachments() returns empty for non-existent path');
+  it('inferType() maps extensions correctly');
 });
 
-describe('InboundMessage Transformation', () => {
-  it('WebChannel derives sessionKey as channel:userId', () => {
-    const web = new WebChannel(mockConfig, mockWss);
-    const msg = web['toInbound']({ text: 'Hello', userId: 'user-123' });
-    expect(msg.sessionKey).toBe('web:user-123');
-    expect(msg.channel).toBe('web');
-  });
-
-  it('TelegramChannel derives sessionKey from chatId', () => {
-    const tg = new TelegramChannel(mockConfig, mockComposio);
-    const msg = tg['toInbound']({ text: 'Hello', chatId: 'chat-456' });
-    expect(msg.sessionKey).toBe('telegram:chat-456');
-  });
-
-  it('CliChannel uses fixed sessionKey', () => {
-    const cli = new CliChannel(mockConfig);
-    const msg = cli['toInbound']('Hello');
-    expect(msg.sessionKey).toBe('cli:local');
-  });
-
-  it('all messages have a unique id', () => {
-    const web = new WebChannel(mockConfig, mockWss);
-    const msg1 = web['toInbound']({ text: 'a', userId: '1' });
-    const msg2 = web['toInbound']({ text: 'b', userId: '1' });
-    expect(msg1.id).not.toBe(msg2.id);
-  });
-
-  it('timestamp is set to current time', () => {
-    const web = new WebChannel(mockConfig, mockWss);
-    const before = Date.now();
-    const msg = web['toInbound']({ text: 'test', userId: '1' });
-    const after = Date.now();
-    expect(msg.timestamp).toBeGreaterThanOrEqual(before);
-    expect(msg.timestamp).toBeLessThanOrEqual(after);
-  });
-
-  it('preserves attachments in InboundMessage', () => {
-    const web = new WebChannel(mockConfig, mockWss);
-    const attachment: Attachment = {
-      id: 'att-1',
-      type: 'image',
-      mimeType: 'image/jpeg',
-      fileSize: 1024,
-      localPath: '/tmp/test.jpg',
-    };
-    const msg = web['toInbound']({ text: 'Look at this', userId: '1', attachments: [attachment] });
-    expect(msg.attachments).toHaveLength(1);
-    expect(msg.attachments![0].type).toBe('image');
-  });
+describe('WebChannel', () => {
+  it('rejects connections without valid token');
+  it('toInbound() derives sessionKey as web:userId');
+  it('processUploads() saves base64 files to temp directory');
+  it('each message gets a unique id');
 });
 
-describe('Telegram Bot Commands', () => {
-  it('/doit triggers gate approval', async () => {
-    const tg = new TelegramChannel(mockConfig, mockComposio);
-    const agent = { approveGate: vi.fn() };
-    tg['agent'] = agent;
-    await tg['handleCommand']('/doit', { sessionKey: 'telegram:123' });
-    expect(agent.approveGate).toHaveBeenCalledWith('telegram:123');
-  });
-
-  it('/memory searches memory', async () => {
-    const tg = new TelegramChannel(mockConfig, mockComposio);
-    const agent = { searchMemory: vi.fn().mockResolvedValue([]) };
-    tg['agent'] = agent;
-    await tg['handleCommand']('/memory TypeScript', { sessionKey: 'telegram:123' });
-    expect(agent.searchMemory).toHaveBeenCalledWith('TypeScript');
-  });
-
-  it('/sessions returns session list', async () => {
-    const tg = new TelegramChannel(mockConfig, mockComposio);
-    const agent = { listSessions: vi.fn().mockResolvedValue([]) };
-    tg['agent'] = agent;
-    await tg['handleCommand']('/sessions', { sessionKey: 'telegram:123' });
-    expect(agent.listSessions).toHaveBeenCalled();
-  });
-
-  it('/describe triggers attachment analysis', async () => {
-    const tg = new TelegramChannel(mockConfig, mockComposio);
-    const agent = { describeAttachment: vi.fn().mockResolvedValue('A cat photo') };
-    tg['agent'] = agent;
-    const msg = { sessionKey: 'telegram:123', attachments: [{ type: 'image' }] };
-    await tg['handleCommand']('/describe', msg);
-    expect(agent.describeAttachment).toHaveBeenCalled();
-  });
-
-  it('unknown commands pass through as regular messages', async () => {
-    const tg = new TelegramChannel(mockConfig, mockComposio);
-    const handler = vi.fn();
-    tg.onMessage(handler);
-    await tg['handleMessage']({ text: '/notacommand test', chatId: '123' });
-    expect(handler).toHaveBeenCalled();
-  });
-});
-```
-
-### `server/tests/phase-5/voice-transcriber.test.ts`
-
-```typescript
-import { describe, it, expect, vi } from 'vitest';
-import { VoiceTranscriber } from '../../src/media/voice-transcriber';
-
-describe('VoiceTranscriber', () => {
-  it('transcribes voice attachment via Groq and returns text', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      text: () => Promise.resolve('Hello world'),
-    });
-    const transcriber = new VoiceTranscriber('test-key');
-    const result = await transcriber.transcribe({
-      id: '1',
-      type: 'voice',
-      mimeType: 'audio/ogg',
-      fileSize: 1024,
-      localPath: '/tmp/test.ogg',
-    });
-    expect(result).toBe('Hello world');
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.groq.com/openai/v1/audio/transcriptions',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('throws on Groq API error', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 429,
-      text: () => Promise.resolve('Rate limited'),
-    });
-    const transcriber = new VoiceTranscriber('test-key');
-    await expect(
-      transcriber.transcribe({
-        id: '1',
-        type: 'voice',
-        mimeType: 'audio/ogg',
-        fileSize: 1024,
-        localPath: '/tmp/test.ogg',
-      }),
-    ).rejects.toThrow('Groq Whisper 429');
-  });
+describe('TelegramChannel', () => {
+  it('toInbound() derives sessionKey as telegram:chatId');
+  it('handles /help command and returns true');
+  it('passes unknown commands as regular messages');
+  it('downloadFile() saves remote file to temp directory');
 });
 ```
 
 ### `server/tests/phase-5/media-processor.test.ts`
 
 ```typescript
-import { describe, it, expect, vi } from 'vitest';
-import { MediaProcessor } from '../../src/media/media-processor';
-
 describe('MediaProcessor', () => {
-  it('passes through messages without attachments', async () => {
-    const processor = new MediaProcessor(mockConfig);
-    const msg = { content: 'Hello', attachments: undefined };
-    const result = await processor.process(msg as any);
-    expect(result.content).toBe('Hello');
-  });
+  it('passes through messages without attachments');
+  it('transcribes voice and appends [Voice message] to content');
+  it('analyzes image and appends [Image] to content');
+  it('reads document and appends [Document] to content');
+  it('handles multiple attachments in one message');
+});
 
-  it('transcribes voice attachments and appends to content', async () => {
-    const processor = new MediaProcessor(mockConfig);
-    vi.spyOn(processor['voiceTranscriber'], 'transcribe').mockResolvedValue('Hello from voice');
-    const msg = {
-      content: '',
-      attachments: [
-        { id: '1', type: 'voice', mimeType: 'audio/ogg', fileSize: 1024, localPath: '/tmp/v.ogg' },
-      ],
-    };
-    const result = await processor.process(msg as any);
-    expect(result.content).toContain('[Voice message]: Hello from voice');
-    expect(result.attachments![0].transcription).toBe('Hello from voice');
-  });
-
-  it('analyzes image attachments and appends to content', async () => {
-    const processor = new MediaProcessor(mockConfig);
-    vi.spyOn(processor['visionAnalyzer'], 'analyze').mockResolvedValue('A screenshot of code');
-    const msg = {
-      content: 'What is this?',
-      attachments: [
-        {
-          id: '1',
-          type: 'image',
-          mimeType: 'image/png',
-          fileSize: 2048,
-          localPath: '/tmp/img.png',
-        },
-      ],
-    };
-    const result = await processor.process(msg as any);
-    expect(result.content).toContain('What is this?');
-    expect(result.content).toContain('[Image: photo]: A screenshot of code');
-  });
-
-  it('reads document attachments and appends text', async () => {
-    const processor = new MediaProcessor(mockConfig);
-    vi.spyOn(processor['documentReader'], 'extract').mockResolvedValue('Document content here');
-    const msg = {
-      content: 'Summarize this',
-      attachments: [
-        {
-          id: '1',
-          type: 'document',
-          mimeType: 'application/pdf',
-          fileName: 'report.pdf',
-          fileSize: 4096,
-          localPath: '/tmp/report.pdf',
-        },
-      ],
-    };
-    const result = await processor.process(msg as any);
-    expect(result.content).toContain('[Document: report.pdf]');
-    expect(result.content).toContain('Document content here');
-  });
-
-  it('handles multiple attachments in one message', async () => {
-    const processor = new MediaProcessor(mockConfig);
-    vi.spyOn(processor['voiceTranscriber'], 'transcribe').mockResolvedValue('Voice text');
-    vi.spyOn(processor['visionAnalyzer'], 'analyze').mockResolvedValue('Image desc');
-    const msg = {
-      content: '',
-      attachments: [
-        { id: '1', type: 'voice', mimeType: 'audio/ogg', fileSize: 1024, localPath: '/tmp/v.ogg' },
-        { id: '2', type: 'image', mimeType: 'image/png', fileSize: 2048, localPath: '/tmp/i.png' },
-      ],
-    };
-    const result = await processor.process(msg as any);
-    expect(result.content).toContain('[Voice message]');
-    expect(result.content).toContain('[Image');
-  });
+describe('VoiceTranscriber', () => {
+  it('calls Groq Whisper API with file and returns text');
+  it('throws on API error');
 });
 
 describe('VisionAnalyzer', () => {
-  it('sends image to Groq Vision API and returns description', async () => {
-    const { VisionAnalyzer } = await import('../../src/media/vision-analyzer');
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ choices: [{ message: { content: 'A cat photo' } }] }),
-    });
-    const analyzer = new VisionAnalyzer('test-key');
-    const result = await analyzer.analyze({
-      id: '1',
-      type: 'image',
-      mimeType: 'image/jpeg',
-      fileSize: 1024,
-      localPath: '/tmp/cat.jpg',
-    });
-    expect(result).toBe('A cat photo');
-  });
+  it('calls Groq Vision API with base64 image and returns description');
+  it('uses custom prompt when provided');
+  it('throws on API error');
 });
 
 describe('DocumentReader', () => {
-  it('reads text files directly', async () => {
-    const { DocumentReader } = await import('../../src/media/document-reader');
-    const reader = new DocumentReader('test-key');
-    vi.spyOn(require('fs/promises'), 'readFile').mockResolvedValue('const x = 1;');
-    const result = await reader.extract({
-      id: '1',
-      type: 'document',
-      mimeType: 'text/typescript',
-      fileName: 'index.ts',
-      fileSize: 128,
-      localPath: '/tmp/index.ts',
-    });
-    expect(result).toBe('const x = 1;');
-  });
-
-  it('returns unsupported message for unknown formats', async () => {
-    const { DocumentReader } = await import('../../src/media/document-reader');
-    const reader = new DocumentReader('test-key');
-    const result = await reader.extract({
-      id: '1',
-      type: 'document',
-      mimeType: 'application/x-unknown',
-      fileName: 'data.xyz',
-      fileSize: 512,
-      localPath: '/tmp/data.xyz',
-    });
-    expect(result).toContain('Unsupported');
-  });
+  it('reads .ts files directly via fs');
+  it('reads .pdf files via pdf-parse');
+  it('reads .csv files with 100-row cap');
+  it('returns unsupported message for unknown formats');
 });
 ```
 
@@ -823,18 +820,18 @@ describe('DocumentReader', () => {
 
 ## Acceptance Criteria
 
-- [ ] All 3 channels (Telegram, Web, CLI) send/receive through same agent loop
-- [ ] Telegram bot responds to all 7 commands (including `/describe`)
-- [ ] WebSocket has token auth
-- [ ] CLI shows green Neo prompt with streaming response
-- [ ] Channel-specific metadata preserved in `InboundMessage`
-- [ ] Voice notes from Telegram are transcribed via Groq Whisper before agent processing
-- [ ] Images sent via any channel are analyzed via Groq Vision
-- [ ] PDF, DOCX, PPTX, XLSX files are parsed via LlamaParse
-- [ ] Code/text files are read directly and included in message content
-- [ ] CSV/TSV files are read with 100-row cap
-- [ ] All media attachments are cleaned up from temp storage after 30 minutes
-- [ ] Unsupported file types return a graceful error message
+- [ ] `ChannelAdapter` interface implemented by CLI, Web, and Telegram
+- [ ] WebSocket channel has token auth (rejects invalid tokens with 4001)
+- [ ] Telegram bot starts via Grammy polling when `TELEGRAM_BOT_TOKEN` is set
+- [ ] Telegram handles text, voice, photo, and document messages
+- [ ] Voice notes transcribed via Groq Whisper before agent processing
+- [ ] Images analyzed via Groq Vision (Llama 3.2 90B)
+- [ ] PDF files parsed via `pdf-parse` (no external API)
+- [ ] Code/text files read directly
+- [ ] CSV/TSV files read with 100-row cap
+- [ ] Media attachments enriched into `InboundMessage.content`
+- [ ] Unsupported file types return graceful message
+- [ ] All tests pass, build clean
 
 ---
 
@@ -843,8 +840,8 @@ describe('DocumentReader', () => {
 ```json
 {
   "dependencies": {
-    "llamaindex": "^0.5.x",
-    "mime-types": "^2.1.35"
+    "grammy": "^1.x",
+    "pdf-parse": "^1.1.1"
   },
   "system": {
     "ffmpeg": "Required for audio conversion (brew install ffmpeg)"
@@ -857,23 +854,27 @@ describe('DocumentReader', () => {
 ## Files Created
 
 ```text
+packages/shared/src/
+└── index.ts                          ← MODIFY (Attachment types, InboundMessage)
+
 server/src/channels/
-├── interface.ts              ← UPDATED (Attachment types)
-├── telegram.ts               ← UPDATED (media handling)
-├── web.ts                    ← UPDATED (file upload support)
-└── cli.ts                    ← UPDATED (file path extraction)
+├── interface.ts                      ← NEW (ChannelAdapter interface)
+├── cli.ts                            ← NEW (CLI channel adapter)
+├── web.ts                            ← NEW (WebSocket channel)
+└── telegram.ts                       ← NEW (Grammy Telegram bot)
 
 server/src/media/
-├── media-processor.ts        ← NEW (orchestrator)
-├── voice-transcriber.ts      ← NEW (Groq Whisper)
-├── vision-analyzer.ts        ← NEW (Groq Vision)
-└── document-reader.ts        ← NEW (LlamaParse)
+├── media-processor.ts                ← NEW (orchestrator + MediaConfig)
+├── voice-transcriber.ts              ← NEW (Groq Whisper)
+├── vision-analyzer.ts                ← NEW (Groq Vision)
+└── document-reader.ts                ← NEW (pdf-parse + direct read)
 
-server/src/config/
-└── media.ts                  ← NEW (MediaConfig)
+server/src/core/
+└── agent.ts                          ← MODIFY (add media step 0)
+
+server/src/index.ts                   ← MODIFY (wire channels)
 
 server/tests/phase-5/
-├── channel-adapter.test.ts   ← UPDATED (attachment tests)
-├── voice-transcriber.test.ts ← NEW
-└── media-processor.test.ts   ← NEW
+├── channel-adapter.test.ts           ← NEW
+└── media-processor.test.ts           ← NEW
 ```

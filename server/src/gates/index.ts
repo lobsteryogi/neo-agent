@@ -7,7 +7,7 @@
  * Returns on first block — subsequent gates are skipped.
  */
 
-import type { GateVerdict } from '@neo-agent/shared';
+import type { GateVerdict, InboundMessage, RouteDecision } from '@neo-agent/shared';
 import { CostGate, type CostGateConfig } from './cost-gate.js';
 import { FileGuard, type FileGuardConfig } from './file-guard.js';
 import { FreeWillGate, type FreeWillConfig, type Gate } from './free-will.js';
@@ -29,7 +29,7 @@ export class GateManager {
     ].filter((g) => g.enabled);
   }
 
-  async check(message: any, route: any): Promise<GateVerdict> {
+  async check(message: InboundMessage, route: RouteDecision): Promise<GateVerdict> {
     for (const gate of this.gates) {
       const verdict = await gate.check(message, route);
       if (verdict.blocked) return verdict;

@@ -10,6 +10,16 @@
 const ESC = '\x1b[';
 const RESET = `${ESC}0m`;
 
+/** Apply 24-bit RGB foreground color. */
+export function rgb(r: number, g: number, b: number): (s: string) => string {
+  return (s: string) => `${ESC}38;2;${r};${g};${b}m${s}${RESET}`;
+}
+
+/** Apply 24-bit RGB background color. */
+export function bgRgb(r: number, g: number, b: number): (s: string) => string {
+  return (s: string) => `${ESC}48;2;${r};${g};${b}m${s}${RESET}`;
+}
+
 export const color = {
   // Matrix greens
   green: (s: string) => `${ESC}32m${s}${RESET}`,
@@ -24,6 +34,7 @@ export const color = {
   dim: (s: string) => `${ESC}2m${s}${RESET}`,
   bold: (s: string) => `${ESC}1m${s}${RESET}`,
   italic: (s: string) => `${ESC}3m${s}${RESET}`,
+  underline: (s: string) => `${ESC}4m${s}${RESET}`,
 
   // Matrix special
   matrix: (s: string) => `${ESC}1;32m${s}${RESET}`, // Bold green
@@ -31,7 +42,52 @@ export const color = {
   darkPhosphor: (s: string) => `${ESC}38;5;22m${s}${RESET}`, // Dark green glow
   amber: (s: string) => `${ESC}38;5;208m${s}${RESET}`, // Warning amber
   neonCyan: (s: string) => `${ESC}38;5;51m${s}${RESET}`, // Neon cyan
+
+  // Cyberpunk accents
+  magenta: (s: string) => `${ESC}38;2;255;0;128m${s}${RESET}`,
+  electricBlue: (s: string) => `${ESC}38;2;0;170;255m${s}${RESET}`,
+  hotPink: (s: string) => `${ESC}38;2;255;105;180m${s}${RESET}`,
+  neonPurple: (s: string) => `${ESC}38;2;180;0;255m${s}${RESET}`,
+  neonYellow: (s: string) => `${ESC}38;2;220;255;0m${s}${RESET}`,
+  dimCyan: (s: string) => `${ESC}2;36m${s}${RESET}`,
 };
+
+// ─── Gradient Text ─────────────────────────────────────────────
+
+/** Render text with a smooth left-to-right RGB gradient. */
+export function gradient(
+  text: string,
+  from: [number, number, number],
+  to: [number, number, number],
+): string {
+  const len = text.length;
+  if (len === 0) return '';
+  if (len === 1) return rgb(from[0], from[1], from[2])(text);
+  return (
+    text
+      .split('')
+      .map((ch, i) => {
+        const t = i / (len - 1);
+        const r = Math.round(from[0] + (to[0] - from[0]) * t);
+        const g = Math.round(from[1] + (to[1] - from[1]) * t);
+        const b = Math.round(from[2] + (to[2] - from[2]) * t);
+        return `${ESC}38;2;${r};${g};${b}m${ch}`;
+      })
+      .join('') + RESET
+  );
+}
+
+// ─── Matrix Spinner ────────────────────────────────────────────
+
+const MATRIX_SPINNER_CHARS = 'ﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘ';
+
+/** Cyberpunk spinner frames — Matrix katakana cycling through green shades. */
+export function getSpinnerFrame(idx: number): string {
+  const ch = MATRIX_SPINNER_CHARS[idx % MATRIX_SPINNER_CHARS.length];
+  const colorFns = [color.phosphor, color.brightGreen, color.green, color.neonCyan];
+  const colorFn = colorFns[idx % colorFns.length];
+  return colorFn(ch);
+}
 
 // ─── Matrix ASCII Art ──────────────────────────────────────────
 
@@ -123,7 +179,9 @@ export function matrixBox(
   const width = Math.max(maxLen, 40);
 
   const top = colorFn(`  ┌${'─'.repeat(width)}┐`);
-  const titleLine = colorFn(`  │ ${color.bold(title)}${' '.repeat(width - title.length - 1)}│`);
+  const titleLine = colorFn(
+    `  │ ${color.bold(title)}${' '.repeat(Math.max(0, width - stripAnsi(title).length - 1))}│`,
+  );
   const separator = colorFn(`  ├${'─'.repeat(width)}┤`);
   const bottom = colorFn(`  └${'─'.repeat(width)}┘`);
 

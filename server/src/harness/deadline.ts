@@ -6,6 +6,7 @@
  * Hard timeout per invocation (default 600s / 10 minutes).
  */
 
+import type { HarnessResponse } from '@neo-agent/shared';
 import type { HarnessWrapper } from './architect.js';
 
 export class Deadline implements HarnessWrapper {
@@ -16,7 +17,7 @@ export class Deadline implements HarnessWrapper {
     this.timeoutMs = timeoutMs;
   }
 
-  async process(response: any): Promise<any> {
+  async process(response: HarnessResponse): Promise<HarnessResponse> {
     // Deadline is primarily enforced in ClaudeBridge via AbortController.
     // This harness wrapper adds timing metadata for observability.
     return {

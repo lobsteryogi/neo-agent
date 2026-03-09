@@ -15,13 +15,18 @@ export class SessionQueue {
     const next = prev.then(() => fn());
 
     // Store the chain (swallow errors to not block subsequent tasks)
-    this.queues.set(
-      key,
-      next.then(
-        () => {},
-        () => {},
-      ),
+    const chain = next.then(
+      () => {},
+      () => {},
     );
+    this.queues.set(key, chain);
+
+    // Clean up completed entries to prevent unbounded map growth
+    chain.then(() => {
+      if (this.queues.get(key) === chain) {
+        this.queues.delete(key);
+      }
+    });
 
     return next;
   }

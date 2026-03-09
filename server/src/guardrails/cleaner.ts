@@ -7,7 +7,7 @@
  * and null bytes from messages.
  */
 
-import type { GuardrailVerdict, SanitizedMessage } from '@neo-agent/shared';
+import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
 import type { Guardrail } from './redactor.js';
 
 const DANGEROUS_PATTERNS: Array<{ regex: RegExp; replacement: string; tag: string }> = [
@@ -26,7 +26,7 @@ const DANGEROUS_PATTERNS: Array<{ regex: RegExp; replacement: string; tag: strin
 export class Cleaner implements Guardrail {
   readonly name = 'Cleaner';
 
-  async check(message: any): Promise<GuardrailVerdict> {
+  async check(message: InboundMessage | SanitizedMessage): Promise<GuardrailVerdict> {
     const content = message.content ?? '';
     let cleaned = content;
     let modified = false;
@@ -50,7 +50,8 @@ export class Cleaner implements Guardrail {
       sanitized: {
         ...message,
         content: cleaned,
-        originalContent: message.originalContent ?? content,
+        originalContent:
+          ('originalContent' in message ? message.originalContent : undefined) ?? content,
       } as SanitizedMessage,
     };
   }

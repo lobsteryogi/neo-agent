@@ -7,7 +7,7 @@
  * Read actions are always allowed.
  */
 
-import type { GateVerdict, PlannedAction } from '@neo-agent/shared';
+import type { GateVerdict, InboundMessage, PlannedAction, RouteDecision } from '@neo-agent/shared';
 import type { Gate } from './free-will.js';
 
 export interface FileGuardConfig {
@@ -25,7 +25,7 @@ export class FileGuard implements Gate {
     this.protectedPaths = config.protectedPaths ?? ['~/.ssh/', '~/.gnupg/', '.env'];
   }
 
-  async check(message: any, route: any): Promise<GateVerdict> {
+  async check(_message: InboundMessage, route: RouteDecision): Promise<GateVerdict> {
     const actions: PlannedAction[] = route?.plannedActions ?? [];
 
     for (const action of actions) {

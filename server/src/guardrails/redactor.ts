@@ -7,11 +7,11 @@
  * the message reaches other guards or Claude.
  */
 
-import type { GuardrailVerdict, SanitizedMessage } from '@neo-agent/shared';
+import type { GuardrailVerdict, InboundMessage, SanitizedMessage } from '@neo-agent/shared';
 
 export interface Guardrail {
   name: string;
-  check(message: any): Promise<GuardrailVerdict>;
+  check(message: InboundMessage | SanitizedMessage): Promise<GuardrailVerdict>;
 }
 
 // Patterns that indicate secrets
@@ -39,7 +39,7 @@ const PATTERNS: Array<{ regex: RegExp; label: string }> = [
 export class Redactor implements Guardrail {
   readonly name = 'Redactor';
 
-  async check(message: any): Promise<GuardrailVerdict> {
+  async check(message: InboundMessage | SanitizedMessage): Promise<GuardrailVerdict> {
     const content = message.content ?? '';
     let sanitized = content;
     let modified = false;
