@@ -10,6 +10,7 @@ import type { RoutingProfile } from '@neo-agent/shared';
 import { getCommandsForChannel } from '../../channels/command-registry.js';
 import { getQuote } from '../../data/matrix-quotes.js';
 import type { LongTermMemory, MemorySearch } from '../../memory/index.js';
+import { getRecentLogs, type LogEntry } from '../../utils/logger.js';
 import {
   color,
   digitalRain,
@@ -256,6 +257,42 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
     );
     console.log(color.dim('    Next message starts a fresh conversation.'));
     console.log();
+    rl.prompt();
+    return true;
+  }
+
+  // ─── /debug ────────────────────────────────────────────────
+  if (input.startsWith('/debug')) {
+    const namespace = input.slice(6).trim() || undefined;
+    const entries = getRecentLogs(50, namespace);
+    if (entries.length === 0) {
+      console.log();
+      console.log(
+        statusIcon.info(namespace ? `No logs for [${namespace}]` : 'No logs captured yet.'),
+      );
+      console.log();
+    } else {
+      const LEVEL_ICON: Record<string, string> = {
+        debug: color.dim('●'),
+        info: color.green('●'),
+        warn: color.yellow('▲'),
+        error: color.red('✗'),
+      };
+      console.log();
+      console.log(
+        `  ${gradient('Debug Trace' + (namespace ? ` — [${namespace}]` : ''), [0, 255, 65], [0, 200, 255])}`,
+      );
+      for (const e of entries) {
+        const icon = LEVEL_ICON[e.level] || '·';
+        const ts = color.dim(e.timestamp.slice(11, 23));
+        const ns = color.cyan(`[${e.namespace}]`);
+        const msg = e.message;
+        const data =
+          e.data && Object.keys(e.data).length > 0 ? color.dim(` ${JSON.stringify(e.data)}`) : '';
+        console.log(`  ${icon} ${ts} ${ns} ${msg}${data}`);
+      }
+      console.log();
+    }
     rl.prompt();
     return true;
   }

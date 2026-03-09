@@ -15,7 +15,8 @@
  *   log.debug('Verbose detail');
  */
 
-import { appendFileSync, existsSync, mkdirSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 
 // ─── Log Levels ─────────────────────────────────────────────────
@@ -49,9 +50,12 @@ interface LoggerConfig {
   timestamps: boolean;
 }
 
+const DEFAULT_LOG_FILE = join(homedir(), '.neo-agent', 'logs', 'neo.log');
+const MAX_LOG_FILE_BYTES = 1_000_000; // 1 MB — rotate when exceeded
+
 const config: LoggerConfig = {
   minLevel: (process.env.NEO_LOG_LEVEL as LogLevel) || 'info',
-  logFile: process.env.NEO_LOG_FILE || undefined,
+  logFile: process.env.NEO_LOG_FILE || DEFAULT_LOG_FILE,
   timestamps: true,
 };
 
@@ -63,9 +67,47 @@ if (config.logFile) {
   }
 }
 
+// ─── Ring Buffer (captures ALL entries regardless of log level) ──
+
+const RING_BUFFER_SIZE = 200;
+const ringBuffer: LogEntry[] = [];
+let ringIndex = 0;
+
+function pushToRing(entry: LogEntry): void {
+  if (ringBuffer.length < RING_BUFFER_SIZE) {
+    ringBuffer.push(entry);
+  } else {
+    ringBuffer[ringIndex] = entry;
+  }
+  ringIndex = (ringIndex + 1) % RING_BUFFER_SIZE;
+}
+
+/**
+ * Retrieve recent log entries from the in-memory ring buffer.
+ * Returns entries in chronological order (oldest first).
+ * These are captured regardless of the console log level.
+ */
+export function getRecentLogs(count?: number, namespace?: string): LogEntry[] {
+  // Reconstruct in chronological order
+  const ordered =
+    ringBuffer.length < RING_BUFFER_SIZE
+      ? [...ringBuffer]
+      : [...ringBuffer.slice(ringIndex), ...ringBuffer.slice(0, ringIndex)];
+
+  const filtered = namespace ? ordered.filter((e) => e.namespace === namespace) : ordered;
+
+  return count ? filtered.slice(-count) : filtered;
+}
+
+/** Clear the ring buffer. */
+export function clearRecentLogs(): void {
+  ringBuffer.length = 0;
+  ringIndex = 0;
+}
+
 // ─── Log Entry ──────────────────────────────────────────────────
 
-interface LogEntry {
+export interface LogEntry {
   timestamp: string;
   level: LogLevel;
   namespace: string;
@@ -103,19 +145,39 @@ function formatForFile(entry: LogEntry): string {
   return JSON.stringify(entry);
 }
 
+function rotateIfNeeded(): void {
+  if (!config.logFile) return;
+  try {
+    const stats = statSync(config.logFile);
+    if (stats.size > MAX_LOG_FILE_BYTES) {
+      // Keep the last half
+      const content = readFileSync(config.logFile, 'utf-8');
+      const half = content.slice(content.length / 2);
+      // Start from the first complete line
+      const firstNewline = half.indexOf('\n');
+      writeFileSync(config.logFile, firstNewline >= 0 ? half.slice(firstNewline + 1) : half);
+    }
+  } catch {
+    // File may not exist yet — that's fine
+  }
+}
+
 function emit(entry: LogEntry): void {
-  // Check level threshold
-  if (LEVEL_PRIORITY[entry.level] < LEVEL_PRIORITY[config.minLevel]) return;
+  // Always capture in ring buffer (regardless of log level)
+  pushToRing(entry);
 
-  // Console output
-  const consoleFn =
-    entry.level === 'error' ? console.error : entry.level === 'warn' ? console.warn : console.log;
-  consoleFn(formatForConsole(entry));
+  // Console output (level-gated)
+  if (LEVEL_PRIORITY[entry.level] >= LEVEL_PRIORITY[config.minLevel]) {
+    const consoleFn =
+      entry.level === 'error' ? console.error : entry.level === 'warn' ? console.warn : console.log;
+    consoleFn(formatForConsole(entry));
+  }
 
-  // File output
+  // File output (always — captures all levels)
   if (config.logFile) {
     try {
       appendFileSync(config.logFile, formatForFile(entry) + '\n');
+      rotateIfNeeded();
     } catch {
       // If we can't write to the log file, don't crash the process
     }

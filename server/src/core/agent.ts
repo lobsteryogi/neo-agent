@@ -21,10 +21,13 @@ import { TaskClassifier, type ClassifierContext } from '../router/classifier.js'
 import { RouterEngine } from '../router/engine.js';
 import { SkillMatcher } from '../skills/matcher.js';
 import { SkillRegistry } from '../skills/registry.js';
+import { logger } from '../utils/logger.js';
 import { ClaudeBridge } from './claude-bridge.js';
 import { ErrorRecovery } from './error-recovery.js';
 import { SessionQueue } from './session-queue.js';
 import { SessionManager } from './session.js';
+
+const log = logger('agent');
 
 export class NeoAgent {
   private bridge: ClaudeBridge;
@@ -101,11 +104,19 @@ export class NeoAgent {
   }
 
   private async _executeLoop(message: InboundMessage): Promise<AgentResponse> {
+    log.debug('Pipeline start', {
+      channel: message.channel,
+      userId: message.userId,
+      contentLength: message.content.length,
+    });
+
     // 0. Media processing (voice → text, image → analysis, document → text)
     const enriched = this.mediaProcessor ? await this.mediaProcessor.process(message) : message;
+    if (this.mediaProcessor) log.debug('Media processed', { hasMedia: enriched !== message });
 
     // 1. Guardrails
     const sanitized = await this.guardrails.process(enriched);
+    log.debug('Guardrails passed', { modified: sanitized.content !== enriched.content });
 
     // 2. Session
     const session = this.sessions.resolveOrCreate(
@@ -113,6 +124,7 @@ export class NeoAgent {
       message.userId,
       message.channel,
     );
+    log.debug('Session resolved', { sessionId: session.id, totalTokens: session.totalTokens ?? 0 });
 
     // 3. Context assembly (stub — Phase 2)
     const systemPrompt = this.buildSystemPrompt(session, sanitized.content);
@@ -123,17 +135,29 @@ export class NeoAgent {
       hasActiveTools: false,
     };
     const classification = this.classifier.classify(sanitized.content, context);
+    log.debug('Task classified', {
+      complexity: classification.complexity,
+      tokenEstimate: classification.tokenEstimate,
+    });
+
     const route = this.router.selectModel(classification, this.config.routingProfile);
+    log.debug('Route selected', {
+      model: route.selectedModel,
+      score: route.score,
+      maxTurns: route.maxTurns,
+    });
 
     // 4b. Decomposition check — delegate to sub-agents if complex (Phase 7)
     const decompose = this.orchestrator.shouldDecompose(sanitized);
     if (decompose.shouldDecompose) {
+      log.debug('Decomposing to sub-agents', { pattern: decompose.suggestedPattern });
       const team = this.orchestrator.createTeam(
         decompose.suggestedPattern,
         [{ id: `task-${Date.now()}`, blueprintName: 'planner', prompt: sanitized.content }],
         session.id,
       );
       const completedTeam = await this.orchestrator.executeTeam(team);
+      log.debug('Sub-agents completed', { resultCount: completedTeam.results.length });
       const output = completedTeam.results
         .map(
           (r) =>
@@ -153,6 +177,7 @@ export class NeoAgent {
     });
 
     if (gateResult.blocked) {
+      log.debug('Gate blocked', { reason: gateResult.reason });
       this.harness.historian.logGateBlock(session.id, gateResult);
       return {
         content: gateResult.neoQuip ?? gateResult.reason ?? 'Blocked by gate.',
@@ -160,8 +185,10 @@ export class NeoAgent {
         gateBlocked: gateResult,
       };
     }
+    log.debug('Gates passed');
 
     // 6. Execute via Claude Bridge
+    log.debug('Executing bridge', { model: route.selectedModel, maxTurns: route.maxTurns });
     const response = await this.bridge.run(sanitized.content, {
       cwd: this.config.workspacePath,
       model: route.selectedModel,
@@ -170,9 +197,11 @@ export class NeoAgent {
       systemPrompt,
       maxTurns: route.maxTurns,
     });
+    log.debug('Bridge result', { success: response.success });
 
     // 7. Harness
     const validated = await this.harness.process(response, session);
+    log.debug('Harness validated', { tokensUsed: validated.tokensUsed });
 
     // 8. Memory (stub — Phase 2)
     if (response.success) {
@@ -180,6 +209,10 @@ export class NeoAgent {
     }
 
     // 9. Deliver
+    log.debug('Pipeline complete', {
+      model: route.selectedModel,
+      tokensUsed: validated.tokensUsed,
+    });
     return {
       content: validated.validatedContent ?? validated.content ?? '',
       model: route.selectedModel,

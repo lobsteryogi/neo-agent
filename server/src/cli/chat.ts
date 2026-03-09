@@ -23,7 +23,7 @@ import {
 } from '../memory/index.js';
 import { TaskClassifier } from '../router/classifier.js';
 import { RouterEngine } from '../router/engine.js';
-import { logger } from '../utils/logger.js';
+import { getRecentLogs, logger } from '../utils/logger.js';
 import { color, getSpinnerFrame } from '../utils/terminal.js';
 import { handleCommand } from './lib/commands.js';
 import {
@@ -217,6 +217,53 @@ rl.on('line', async (line) => {
       permissionMode: permMode,
       allowDangerouslySkipPermissions: permMode === 'bypassPermissions',
     };
+
+    // Self-debug: inject recent logs when intent suggests user wants insight into agent behavior
+    // Broad intent detection — no slash command needed
+    const lower = sanitized.content.toLowerCase();
+    const isDebugIntent =
+      // Explicit debug requests
+      /\b(debug|diagnose|trace|inspect|self-debug)\b/.test(lower) ||
+      // Questions about agent behavior
+      /\b(what happened|why did you|what went wrong|how did you|what did you do)\b/.test(lower) ||
+      // Complaints about behavior
+      /\b(too slow|took too long|wrong answer|incorrect|you (were|are) wrong|broke|broken|failing)\b/.test(
+        lower,
+      ) ||
+      // Self-reflection / introspection requests
+      /\b(how do you work|your (logs?|pipeline|process|routing|thinking)|show me your|explain your)\b/.test(
+        lower,
+      ) ||
+      // Troubleshooting patterns
+      /\b(something (is )?wrong|not working|didn'?t work|error|issue|problem|bug)\b/.test(lower);
+
+    if (isDebugIntent) {
+      const recentLogs = getRecentLogs(100);
+      if (recentLogs.length > 0) {
+        const logText = recentLogs
+          .map((e) => {
+            const data =
+              e.data && Object.keys(e.data).length > 0 ? ` ${JSON.stringify(e.data)}` : '';
+            const err = e.error ? ` ERROR: ${e.error.message}` : '';
+            return `[${e.timestamp.slice(11, 23)}] ${e.level.toUpperCase()} [${e.namespace}] ${e.message}${data}${err}`;
+          })
+          .join('\n');
+        runOpts.systemPrompt += `\n\n## Self-Debug Context\n\nThe user appears to be asking about your behavior, performance, or a problem they encountered. Below are your recent internal pipeline logs — use them to explain what happened, diagnose issues, or reason about your own processing. Be transparent and helpful.\n\n<debug_logs>\n${logText}\n</debug_logs>`;
+        log.debug('Debug context injected', { logCount: recentLogs.length });
+      }
+    } else {
+      // Always inject a lightweight summary of the last exchange so the agent has baseline self-awareness
+      const lastFew = getRecentLogs(10);
+      if (lastFew.length > 0) {
+        const summary = lastFew
+          .filter((e) => e.level !== 'debug') // only info/warn/error for the light summary
+          .map((e) => `[${e.level.toUpperCase()}] [${e.namespace}] ${e.message}`)
+          .join('\n');
+        if (summary) {
+          runOpts.systemPrompt += `\n\n## Recent Internal State\n\n<agent_state>\n${summary}\n</agent_state>`;
+        }
+      }
+    }
 
     // Resume session if we have a previous SDK session ID
     if (sessionMgr.current.sdkSessionId) {

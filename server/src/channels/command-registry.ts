@@ -43,6 +43,12 @@ export const COMMANDS: CommandDef[] = [
   },
   { command: '/new', description: 'Fresh session', channels: ['cli', 'telegram'] },
   { command: '/compact', description: 'Compact session context', channels: ['cli', 'telegram'] },
+  {
+    command: '/debug',
+    args: '[namespace]',
+    description: 'Show recent debug logs',
+    channels: ['cli'],
+  },
   { command: '/onboard', description: 'Re-configure agent', channels: ['cli'] },
   { command: '/clear', description: 'Clear terminal', channels: ['cli'] },
   { command: '/help', description: 'Show available commands', channels: ['cli', 'telegram'] },
