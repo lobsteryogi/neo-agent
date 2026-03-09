@@ -101,7 +101,10 @@ ok "pnpm v${PNPM_VERSION}"
 
 # Claude Code CLI
 command -v claude &>/dev/null || fail "Claude Code CLI is required — install: https://docs.anthropic.com/en/docs/claude-code"
-ok "Claude Code CLI found"
+if ! claude auth status 2>/dev/null | grep -q '"loggedIn": true'; then
+  fail "Claude Code CLI is not logged in — run: claude auth login"
+fi
+ok "Claude Code CLI (authenticated)"
 
 # Native build tools (required for better-sqlite3 when no prebuilt binary exists)
 if [[ "$(uname -s)" == "Linux" ]]; then
