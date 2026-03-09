@@ -43,14 +43,19 @@ export function statsLine(
   model?: string,
   routeScore?: number,
   compaction?: { summarized: number; kept: number } | null,
+  turns?: number,
+  compactThreshold?: number,
 ): string {
   const dur = (durationMs / 1000).toFixed(1);
   const modelTag = model ? ` ${color.magenta(model)}` : '';
   const routeTag =
     routeScore !== undefined ? ` ${color.dimCyan(`r:${routeScore.toFixed(2)}`)}` : '';
-  const compactTag = compaction
-    ? ` ${color.darkGreen(`▓${compaction.summarized}→${compaction.kept}`)}`
-    : '';
+  let compactTag = '';
+  if (compaction) {
+    compactTag = ` ${color.darkGreen(`▓${compaction.summarized}→${compaction.kept}`)}`;
+  } else if (turns !== undefined && compactThreshold !== undefined) {
+    compactTag = ` ${color.dim(`▓${turns}/${compactThreshold}`)}`;
+  }
   return `  ${color.darkGreen('┗━')} ${color.neonCyan(`↓${fmtTokens(output)}`)} ${color.neonYellow(fmtCost(cost))} ${color.dim(`${dur}s`)}  ${color.green(`Σ${fmtTokens(sessionTotal)}`)}${modelTag}${routeTag}${compactTag}`;
 }
 

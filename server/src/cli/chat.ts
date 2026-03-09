@@ -659,6 +659,8 @@ rl.on('line', async (line) => {
         ctx.modelUsed,
         route.score,
         lastCompactionInfo,
+        s.turns,
+        AUTO_COMPACT_TURN_THRESHOLD,
       ),
     );
     console.log();
