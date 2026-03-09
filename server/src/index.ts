@@ -8,6 +8,7 @@ import 'dotenv/config';
 import express from 'express';
 import { join } from 'path';
 import { closeDb, getDb } from './db/connection.js';
+import { startLogRelay } from './utils/log-relay.js';
 import {
   MATRIX_DIVIDER,
   NEO_BANNER,
@@ -29,6 +30,9 @@ async function main(): Promise<void> {
   console.log(NEO_BANNER);
   console.log(MATRIX_DIVIDER);
   await sleep(300);
+
+  // Start log relay — receives logs from remote processes (chat CLI, etc.)
+  startLogRelay();
 
   // Initialize database
   const db = getDb();

@@ -23,7 +23,7 @@ import {
 } from '../memory/index.js';
 import { TaskClassifier } from '../router/classifier.js';
 import { RouterEngine } from '../router/engine.js';
-import { getRecentLogs, logger } from '../utils/logger.js';
+import { enableLogRelay, getRecentLogs, logger } from '../utils/logger.js';
 import { color, getSpinnerFrame } from '../utils/terminal.js';
 import { handleCommand } from './lib/commands.js';
 import {
@@ -43,6 +43,10 @@ import { buildSystemPrompt, type SystemPromptDeps } from './lib/system-prompt.js
 const bridge = new ClaudeBridge();
 const guardrails = new GuardrailPipeline();
 const db = getDb();
+
+// Relay chat logs to the neo:dev server terminal
+enableLogRelay();
+
 const log = logger('chat');
 
 log.debug('Initializing chat', {

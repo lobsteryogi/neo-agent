@@ -15,6 +15,7 @@
  *   log.debug('Verbose detail');
  */
 
+import dgram from 'dgram';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -166,6 +167,9 @@ function emit(entry: LogEntry): void {
   // Always capture in ring buffer (regardless of log level)
   pushToRing(entry);
 
+  // UDP relay to server terminal (if enabled)
+  relayLog(entry);
+
   // Console output (level-gated)
   if (LEVEL_PRIORITY[entry.level] >= LEVEL_PRIORITY[config.minLevel]) {
     const consoleFn =
@@ -238,4 +242,35 @@ export function setLogLevel(level: LogLevel): void {
  */
 export function getLogLevel(): LogLevel {
   return config.minLevel;
+}
+
+// ─── UDP Log Relay (client side) ────────────────────────────────
+
+const RELAY_PORT = Number(process.env.NEO_LOG_RELAY_PORT) || 3143;
+let relaySocket: dgram.Socket | null = null;
+let relayEnabled = false;
+
+/**
+ * Enable UDP log relay — sends a copy of every log entry to the
+ * neo:dev server terminal via UDP. Call this in remote processes
+ * (e.g. the chat CLI) so their logs appear in the server output.
+ *
+ * UDP is fire-and-forget: if no relay listener is running, packets
+ * are silently dropped with zero overhead.
+ */
+export function enableLogRelay(): void {
+  if (relayEnabled) return;
+  relayEnabled = true;
+  relaySocket = dgram.createSocket('udp4');
+  relaySocket.unref(); // Don't keep process alive
+}
+
+function relayLog(entry: LogEntry): void {
+  if (!relayEnabled || !relaySocket) return;
+  try {
+    const buf = Buffer.from(JSON.stringify(entry));
+    relaySocket.send(buf, RELAY_PORT, '127.0.0.1');
+  } catch {
+    // Fire and forget — never crash for relay failures
+  }
 }
