@@ -2,7 +2,7 @@ import { WIZARD_DEFAULTS } from '@neo-agent/shared';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { generateClaudeSettings, generateWorkspaceFiles } from '../../src/onboard/wizard.js';
+import { generateClaudeSettings, generateWorkspaceFiles } from '../../src/onboard/generators.js';
 
 describe('Phase 0 — Workspace Files', () => {
   const tmpDir = join(__dirname, '__tmp_workspace__');

@@ -392,6 +392,7 @@ export interface WizardAnswers {
   routingProfile: RoutingProfile;
   composioApiKey?: string;
   telegramBotToken?: string;
+  geminiApiKey?: string;
   syncRepo?: string;
   tailscaleEnabled?: boolean;
   enableDashboard: boolean;
