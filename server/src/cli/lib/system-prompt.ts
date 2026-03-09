@@ -9,6 +9,7 @@
 import type Database from 'better-sqlite3';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { BROWSER_SYSTEM_INSTRUCTIONS } from '../../browser/index.js';
 import { LongTermMemory, OperationalMemory } from '../../memory/index.js';
 
 // ─── Verbosity Presets ────────────────────────────────────────
@@ -43,10 +44,20 @@ export interface SystemPromptDeps {
   personality: string;
   verbosity: string;
   workspace: string;
+  browserAvailable?: boolean;
 }
 
 export function buildSystemPrompt(deps: SystemPromptDeps): string {
-  const { db, longTermMemory, agentName, userName, personality, verbosity, workspace } = deps;
+  const {
+    db,
+    longTermMemory,
+    agentName,
+    userName,
+    personality,
+    verbosity,
+    workspace,
+    browserAvailable,
+  } = deps;
   const parts: string[] = [];
 
   // Core identity
@@ -89,6 +100,12 @@ export function buildSystemPrompt(deps: SystemPromptDeps): string {
   if (existsSync(userPath)) {
     parts.push('## About Your Human');
     parts.push(readFileSync(userPath, 'utf-8'));
+    parts.push('');
+  }
+
+  // Browser automation instructions (when agent-browser is available)
+  if (browserAvailable) {
+    parts.push(BROWSER_SYSTEM_INSTRUCTIONS);
     parts.push('');
   }
 

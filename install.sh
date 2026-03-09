@@ -154,6 +154,23 @@ info "Installing dependencies via pnpm..."
 (cd "$INSTALL_DIR" && pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
 ok "Dependencies installed"
 
+# ─── Browser Automation (agent-browser) ──────────────────────
+step "Browser Automation"
+
+info "Setting up agent-browser for web automation..."
+if npx agent-browser --version &>/dev/null; then
+  ok "agent-browser $(npx agent-browser --version 2>/dev/null)"
+  info "Installing Chromium browser binaries..."
+  if npx agent-browser install &>/dev/null; then
+    ok "Chromium binaries installed"
+  else
+    warn "Chromium install failed — run 'npx agent-browser install' manually later"
+  fi
+else
+  warn "agent-browser not available — browser automation will be disabled"
+  warn "Install manually: npm install -g agent-browser && agent-browser install"
+fi
+
 # ─── Build (optional) ────────────────────────────────────────
 if [[ "$RUN_BUILD" == true ]]; then
   step "Build"

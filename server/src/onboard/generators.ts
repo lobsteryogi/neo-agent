@@ -279,6 +279,7 @@ export function generateClaudeSettings(answers: WizardAnswers, workspacePath: st
         'WebSearch(*)',
         'WebFetch(*)',
         'Write(*)',
+        'Bash(npx agent-browser *)',
       ],
       deny: [
         'Bash(rm -rf *)',

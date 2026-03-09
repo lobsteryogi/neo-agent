@@ -75,6 +75,21 @@ const memoryExtractor = new MemoryExtractor();
 
 const WORKSPACE = process.env.NEO_WORKSPACE_PATH || './workspace';
 
+// ─── Browser Availability ─────────────────────────────────────
+import { AgentBrowser } from '../browser/index.js';
+
+let browserAvailable = false;
+try {
+  const browser = new AgentBrowser();
+  const health = await browser.healthCheck();
+  browserAvailable = health.available;
+  if (browserAvailable) {
+    log.debug('Browser automation available', { version: health.version });
+  }
+} catch {
+  log.debug('Browser check skipped');
+}
+
 const promptDeps: SystemPromptDeps = {
   db,
   longTermMemory,
@@ -83,6 +98,7 @@ const promptDeps: SystemPromptDeps = {
   personality: process.env.NEO_PERSONALITY_INTENSITY || 'moderate',
   verbosity: process.env.NEO_VERBOSITY || 'balanced',
   workspace: WORKSPACE,
+  browserAvailable,
 };
 
 let systemPrompt = buildSystemPrompt(promptDeps);

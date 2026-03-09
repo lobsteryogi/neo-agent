@@ -333,6 +333,38 @@ export interface DecomposeDecision {
   signals: Record<string, boolean>;
 }
 
+// ─── Browser ──────────────────────────────────────────────────
+
+export interface BrowserAction {
+  type:
+    | 'navigate'
+    | 'click'
+    | 'fill'
+    | 'type'
+    | 'press'
+    | 'screenshot'
+    | 'snapshot'
+    | 'wait'
+    | 'scroll'
+    | 'select'
+    | 'hover'
+    | 'back'
+    | 'forward'
+    | 'reload'
+    | 'tab'
+    | 'close';
+  target?: string; // URL, ref (@e1), selector, or key
+  value?: string; // Text to fill/type, option to select
+}
+
+export interface BrowserSnapshot {
+  url: string;
+  title: string;
+  snapshot: string; // Accessibility tree text
+  refs: Record<string, { selector: string; role: string; name: string }>;
+  timestamp: number;
+}
+
 // ─── Health ────────────────────────────────────────────────────
 
 export interface ToolHealth {
