@@ -84,6 +84,22 @@ export function buildSystemPrompt(deps: SystemPromptDeps): string {
     parts.push('');
   }
 
+  // Read USER.md (human profile)
+  const userPath = join(workspace, 'USER.md');
+  if (existsSync(userPath)) {
+    parts.push('## About Your Human');
+    parts.push(readFileSync(userPath, 'utf-8'));
+    parts.push('');
+  }
+
+  // Read BOOTSTRAP.md (first-run instructions — deleted after first session)
+  const bootstrapPath = join(workspace, 'BOOTSTRAP.md');
+  if (existsSync(bootstrapPath)) {
+    parts.push('## 🚀 First Run — Bootstrap');
+    parts.push(readFileSync(bootstrapPath, 'utf-8'));
+    parts.push('');
+  }
+
   // ─── Déjà Vu: Memory Context ────────────────────────────────
   const memories = longTermMemory.getRecent(10);
   if (memories.length > 0) {

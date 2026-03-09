@@ -87,7 +87,7 @@ export class RouterEngine {
 
   private scoreToTier(score: number): ModelTier {
     if (score >= 0.7) return 'opus';
-    if (score >= 0.4) return 'sonnet';
-    return 'haiku';
+    // Minimum tier is sonnet — haiku is too weak for general use
+    return 'sonnet';
   }
 }

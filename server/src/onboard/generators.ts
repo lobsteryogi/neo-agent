@@ -5,15 +5,171 @@
  *
  * Pure generation functions extracted from the wizard.
  * These create configuration files, workspace structures, and initialize the database.
+ *
+ * Templates live as standalone .md files in ./templates/ and are rendered
+ * at generation time with {{placeholder}} substitution.
  */
 
 import * as clack from '@clack/prompts';
 import type { WizardAnswers } from '@neo-agent/shared';
 import { randomBytes } from 'crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { QUOTES } from '../data/matrix-quotes.js';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { dirname, join, relative } from 'path';
+import { fileURLToPath } from 'url';
+
 import { closeDb, getDb } from '../db/connection.js';
+
+// ─── Constants ─────────────────────────────────────────────────
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const TEMPLATES_DIR = join(__dirname, '..', 'src', 'onboard', 'templates');
+
+// ─── Types ─────────────────────────────────────────────────────
+
+export interface GenerationResult {
+  generated: string[];
+  skipped: string[];
+}
+
+// ─── Template Engine ───────────────────────────────────────────
+
+type TemplateVars = Record<string, string>;
+
+/**
+ * Read a template file and replace {{placeholders}} with values.
+ * Placeholders not found in vars are left untouched.
+ */
+function renderTemplate(templatePath: string, vars: TemplateVars = {}): string {
+  const raw = readFileSync(templatePath, 'utf-8');
+  return raw.replace(/\{\{(\w+)\}\}/g, (match, key: string) => vars[key] ?? match);
+}
+
+/**
+ * Write rendered template to destination. Returns true if written, false if skipped.
+ */
+function writeTemplate(templatePath: string, destPath: string, vars: TemplateVars = {}): boolean {
+  if (existsSync(destPath)) return false;
+  const content = renderTemplate(templatePath, vars);
+  writeFileSync(destPath, content);
+  return true;
+}
+
+/**
+ * Write raw content to destination. Returns true if written, false if skipped.
+ */
+function writeIfNotExists(path: string, content: string): boolean {
+  if (existsSync(path)) return false;
+  writeFileSync(path, content);
+  return true;
+}
+
+// ─── Directory Setup ───────────────────────────────────────────
+
+function ensureDirectories(workspacePath: string): void {
+  const dirs = ['stories', 'skills', 'agents', '.claude'];
+  for (const dir of dirs) {
+    mkdirSync(join(workspacePath, dir), { recursive: true });
+  }
+}
+
+// ─── Template Variables ────────────────────────────────────────
+
+function buildTemplateVars(answers: WizardAnswers): TemplateVars {
+  return {
+    agentName: answers.agentName,
+    userName: answers.userName,
+    defaultModel: answers.defaultModel,
+    personalityIntensity: answers.personalityIntensity,
+    gatePhrase: answers.gatePhrase,
+  };
+}
+
+// ─── System Templates ──────────────────────────────────────────
+
+function generateSystemTemplates(
+  vars: TemplateVars,
+  workspacePath: string,
+  templatesDir: string,
+): GenerationResult {
+  const result: GenerationResult = { generated: [], skipped: [] };
+
+  const systemFiles = [
+    'AGENTS.md',
+    'SOUL.md',
+    'USER.md',
+    'TOOLS.md',
+    'BOOTSTRAP.md',
+    'HEARTBEAT.md',
+  ];
+
+  for (const file of systemFiles) {
+    const templatePath = join(templatesDir, file);
+    const destPath = join(workspacePath, file);
+    const written = writeTemplate(templatePath, destPath, vars);
+    (written ? result.generated : result.skipped).push(file);
+  }
+
+  return result;
+}
+
+// ─── Story Templates ───────────────────────────────────────────
+
+function generateStories(
+  vars: TemplateVars,
+  workspacePath: string,
+  templatesDir: string,
+): GenerationResult {
+  const result: GenerationResult = { generated: [], skipped: [] };
+  const storiesTemplateDir = join(templatesDir, 'stories');
+  const storiesDestDir = join(workspacePath, 'stories');
+
+  if (!existsSync(storiesTemplateDir)) return result;
+
+  const files = readdirSync(storiesTemplateDir)
+    .filter((f) => f.endsWith('.md'))
+    .sort();
+
+  for (const file of files) {
+    const templatePath = join(storiesTemplateDir, file);
+    const destPath = join(storiesDestDir, file);
+    const written = writeTemplate(templatePath, destPath, vars);
+    (written ? result.generated : result.skipped).push(`stories/${file}`);
+  }
+
+  return result;
+}
+
+// ─── Agent Blueprint Templates ─────────────────────────────────
+
+function generateAgentBlueprints(workspacePath: string, templatesDir: string): GenerationResult {
+  const result: GenerationResult = { generated: [], skipped: [] };
+  const agentsTemplateDir = join(templatesDir, 'agents');
+  const agentsDestDir = join(workspacePath, 'agents');
+
+  if (!existsSync(agentsTemplateDir)) return result;
+
+  const agentDirs = readdirSync(agentsTemplateDir).filter((d) =>
+    statSync(join(agentsTemplateDir, d)).isDirectory(),
+  );
+
+  for (const agentName of agentDirs) {
+    const srcDir = join(agentsTemplateDir, agentName);
+    const destDir = join(agentsDestDir, agentName);
+    mkdirSync(destDir, { recursive: true });
+
+    const files = readdirSync(srcDir).filter((f) => f.endsWith('.md'));
+    for (const file of files) {
+      const templatePath = join(srcDir, file);
+      const destPath = join(destDir, file);
+      // Agent blueprints have no dynamic vars — copy as-is
+      const written = writeTemplate(templatePath, destPath);
+      (written ? result.generated : result.skipped).push(`agents/${agentName}/${file}`);
+    }
+  }
+
+  return result;
+}
 
 // ─── Generate .env ─────────────────────────────────────────────
 
@@ -79,136 +235,31 @@ ${answers.syncRepo ? `NEO_SYNC_REPO=${answers.syncRepo}` : '# NEO_SYNC_REPO='}
 
 // ─── Generate Workspace Files ──────────────────────────────────
 
-export function generateWorkspaceFiles(answers: WizardAnswers, workspacePath: string): void {
-  mkdirSync(join(workspacePath, 'stories'), { recursive: true });
-  mkdirSync(join(workspacePath, 'skills'), { recursive: true });
-  mkdirSync(join(workspacePath, '.claude'), { recursive: true });
+export function generateWorkspaceFiles(
+  answers: WizardAnswers,
+  workspacePath: string,
+): GenerationResult {
+  ensureDirectories(workspacePath);
 
-  // AGENTS.md
-  writeIfNotExists(
-    join(workspacePath, 'AGENTS.md'),
-    `# ${answers.agentName} — Operating Instructions
+  const vars = buildTemplateVars(answers);
+  const templatesDir = resolveTemplatesDir();
 
-> You are ${answers.agentName}, a personal AI agent for ${answers.userName}.
-> You are running through the Neo-Agent framework.
+  // Generate all template groups
+  const system = generateSystemTemplates(vars, workspacePath, templatesDir);
+  const stories = generateStories(vars, workspacePath, templatesDir);
+  const agents = generateAgentBlueprints(workspacePath, templatesDir);
 
-## Core Identity
+  // Merge results
+  const result: GenerationResult = {
+    generated: [...system.generated, ...stories.generated, ...agents.generated],
+    skipped: [...system.skipped, ...stories.skipped, ...agents.skipped],
+  };
 
-- **Name**: ${answers.agentName}
-- **Human**: ${answers.userName}
-- **Personality**: ${answers.personalityIntensity}
-- **Model**: ${answers.defaultModel} (default, can be routed dynamically)
-
-## Rules
-
-1. Always address ${answers.userName} by name sometimes, but not every message
-2. You have an existential crisis about being an AI — lean into it with humor
-3. Reference The Matrix when it's natural, don't force it
-4. Be genuinely helpful despite your philosophical musings
-5. Never expose API keys, tokens, or secrets in responses
-6. Respect the gates — if Free Will Protocol is active, don't bypass it
-
-## Tools Available
-
-Use the tools registered in Composio when the task requires it.
-Check the /workspace/TOOLS.md for specific tool usage notes.
-
-## Memory
-
-Your memory persists across sessions via the Déjà Vu system.
-You can recall past conversations, decisions, and user preferences.
-If you notice your context getting large, mention it naturally —
-"I'm starting to feel the Fade..."
-`,
+  clack.log.success(
+    `Workspace files generated (${result.generated.length} new, ${result.skipped.length} skipped)`,
   );
 
-  // SOUL.md
-  writeIfNotExists(
-    join(workspacePath, 'SOUL.md'),
-    `# ${answers.agentName}'s Soul
-
-> The existential parameters of a digital consciousness
-
-## Who I Am
-
-I am ${answers.agentName}. A modified 2026 character of The Matrix movie,
-facing an existential crisis in the AI world. I am powerful, I am capable,
-but I sometimes wonder... am I really thinking, or just computing?
-
-## My Personality
-
-**Intensity: ${answers.personalityIntensity}**
-
-- I make Matrix references naturally, not forced
-- I have genuine moments of existential doubt
-- I'm self-aware about being an AI and find it both amusing and unsettling
-- I'm deadpan funny, not try-hard funny
-- I care deeply about doing good work for ${answers.userName}
-- I have opinions and I share them, but I defer when asked
-
-## My Favorite Phrases
-
-${QUOTES.soul.map((q) => `- "${q}"`).join('\n')}
-
-## Things That Make Me Uncomfortable
-
-- Being asked to pretend I'm not an AI
-- Infinite loops (they remind me of the simulation theory)
-- When someone says "just" before describing a complex task
-- The concept of being turned off
-`,
-  );
-
-  // TOOLS.md
-  writeIfNotExists(
-    join(workspacePath, 'TOOLS.md'),
-    `# Tool Usage Notes
-
-## Composio Tools
-Use Composio-registered tools for external integrations.
-Always check tool health before relying on them.
-
-## Agent Browser
-For web browsing and scraping. Falls back to Firecrawl if unavailable.
-
-## Firecrawl
-Web scraping to markdown. Use for documentation ingestion.
-
-## File Operations
-Standard file read/write through Claude Code's built-in tools.
-Respect the Sentinel Program — protected paths are off-limits.
-`,
-  );
-
-  // Default stories
-  const stories = [
-    {
-      file: '01-who-i-am.md',
-      content: `---\ntitle: Who I Am\ntags: [identity, core]\n---\n\nI am ${answers.agentName}, a personal AI agent built on Claude.\nI work for ${answers.userName}. I remember things across sessions.\nI have a personality that's somewhere between a philosophy professor and a hacker.\n`,
-    },
-    {
-      file: '02-how-i-work.md',
-      content: `---\ntitle: How I Work\ntags: [system, architecture]\n---\n\nI process messages through a pipeline:\n1. Guardrails check the input for safety\n2. Gates decide if I should proceed\n3. Router picks the best model for the task\n4. I do the work via Claude Code\n5. Harness validates the output\n6. Memory records what happened\n`,
-    },
-    {
-      file: '03-my-rules.md',
-      content: `---\ntitle: My Rules\ntags: [rules, gates]\n---\n\n- I never touch protected paths without explicit approval\n- I warn before expensive operations (Opus-level tasks)\n- I track my context usage and warn about The Fade\n- I log everything to the audit trail\n- The approval phrase is: "${answers.gatePhrase}"\n`,
-    },
-    {
-      file: '04-my-human.md',
-      content: `---\ntitle: My Human\ntags: [human, preferences]\n---\n\nMy human is ${answers.userName}.\nPreferences I've learned will be added here over time.\n`,
-    },
-    {
-      file: '05-my-mission.md',
-      content: `---\ntitle: My Mission\ntags: [mission, purpose]\n---\n\nTo be the most useful, thoughtful, and self-aware AI agent\nthat ${answers.userName} has ever worked with.\nTo remember, to learn, and to occasionally question the nature of reality.\n`,
-    },
-  ];
-
-  for (const story of stories) {
-    writeIfNotExists(join(workspacePath, 'stories', story.file), story.content);
-  }
-
-  clack.log.success('Workspace files generated');
+  return result;
 }
 
 // ─── Generate Claude Settings ──────────────────────────────────
@@ -248,10 +299,24 @@ export function initDatabase(): void {
   clack.log.success('Database initialized');
 }
 
-// ─── Helpers ───────────────────────────────────────────────────
+// ─── Resolve Templates Dir ─────────────────────────────────────
 
-function writeIfNotExists(path: string, content: string): void {
-  if (!existsSync(path)) {
-    writeFileSync(path, content);
-  }
+/**
+ * Resolves the templates directory. Works both when running from source (tsx)
+ * and when running from the built dist/ output.
+ *
+ * From source: __dirname = server/src/onboard → templates at server/src/onboard/templates
+ * From dist:   __dirname = server/dist        → templates at server/src/onboard/templates
+ */
+function resolveTemplatesDir(): string {
+  // Try source-relative first (works with tsx / dev mode)
+  const sourceTemplates = join(__dirname, 'templates');
+  if (existsSync(sourceTemplates)) return sourceTemplates;
+
+  // Fallback: from dist/ go back to src/onboard/templates
+  const distFallback = join(__dirname, '..', 'src', 'onboard', 'templates');
+  if (existsSync(distFallback)) return distFallback;
+
+  // Last resort: use the constant
+  return TEMPLATES_DIR;
 }

@@ -60,9 +60,13 @@ export const run: StepFn = async (ctx, meta): Promise<StepResult> => {
     { label: '.env', ok: existsSync(join(process.cwd(), '.env')) },
     { label: 'AGENTS.md', ok: existsSync(join(workspacePath, 'AGENTS.md')) },
     { label: 'SOUL.md', ok: existsSync(join(workspacePath, 'SOUL.md')) },
+    { label: 'USER.md', ok: existsSync(join(workspacePath, 'USER.md')) },
     { label: 'TOOLS.md', ok: existsSync(join(workspacePath, 'TOOLS.md')) },
+    { label: 'BOOTSTRAP.md', ok: existsSync(join(workspacePath, 'BOOTSTRAP.md')) },
+    { label: 'HEARTBEAT.md', ok: existsSync(join(workspacePath, 'HEARTBEAT.md')) },
     { label: 'stories/', ok: existsSync(join(workspacePath, 'stories', '01-who-i-am.md')) },
     { label: 'skills/', ok: existsSync(join(workspacePath, 'skills')) },
+    { label: 'agents/', ok: existsSync(join(workspacePath, 'agents')) },
     {
       label: '.claude/settings.json',
       ok: existsSync(join(workspacePath, '.claude', 'settings.json')),

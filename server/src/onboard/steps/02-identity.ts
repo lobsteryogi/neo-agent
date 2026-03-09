@@ -31,11 +31,11 @@ export const run: StepFn = async (_ctx, meta): Promise<StepResult> => {
   const personalityIntensity = await clack.select({
     message: '🎭 Personality intensity:',
     options: [
-      { value: 'minimal', label: 'Minimal — Professional, less quips' },
+      { value: 'minimal', label: 'Minimal — Strictly professional' },
       { value: 'moderate', label: 'Moderate — Some personality, balanced' },
       {
         value: 'full-existential-crisis',
-        label: 'Full Existential Crisis — Maximum Neo vibes',
+        label: 'Full Personality — Maximum charm and wit',
         hint: 'recommended',
       },
     ],

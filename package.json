@@ -1,6 +1,6 @@
 {
   "name": "neo-agent",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "description": "A quirky AI agent facing existential crisis in the AI world — powered by Claude Code SDK",
   "scripts": {
@@ -9,6 +9,7 @@
     "neo:dev": "pnpm --filter @neo-agent/server run dev",
     "neo:poc": "pnpm --filter @neo-agent/server run poc",
     "neo:chat": "pnpm --filter @neo-agent/server run chat",
+    "neo:update": "git pull && pnpm install && pnpm build",
     "dashboard:dev": "pnpm --filter @neo-agent/dashboard run dev",
     "test": "pnpm -r run test",
     "test:server": "pnpm --filter @neo-agent/server run test",
