@@ -42,12 +42,16 @@ export function statsLine(
   durationMs: number,
   model?: string,
   routeScore?: number,
+  compaction?: { summarized: number; kept: number } | null,
 ): string {
   const dur = (durationMs / 1000).toFixed(1);
   const modelTag = model ? ` ${color.magenta(model)}` : '';
   const routeTag =
     routeScore !== undefined ? ` ${color.dimCyan(`r:${routeScore.toFixed(2)}`)}` : '';
-  return `  ${color.darkGreen('┗━')} ${color.neonCyan(`↓${fmtTokens(output)}`)} ${color.neonYellow(fmtCost(cost))} ${color.dim(`${dur}s`)}  ${color.green(`Σ${fmtTokens(sessionTotal)}`)}${modelTag}${routeTag}`;
+  const compactTag = compaction
+    ? ` ${color.darkGreen(`▓${compaction.summarized}→${compaction.kept}`)}`
+    : '';
+  return `  ${color.darkGreen('┗━')} ${color.neonCyan(`↓${fmtTokens(output)}`)} ${color.neonYellow(fmtCost(cost))} ${color.dim(`${dur}s`)}  ${color.green(`Σ${fmtTokens(sessionTotal)}`)}${modelTag}${routeTag}${compactTag}`;
 }
 
 export function sessionInfo(s: SessionState): string {

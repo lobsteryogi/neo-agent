@@ -137,6 +137,7 @@ rl.prompt();
 // Result is injected into system prompt until absorbed by the SDK session.
 
 let compactedContext: string | null = null;
+let lastCompactionInfo: { summarized: number; kept: number } | null = null;
 
 const AUTO_COMPACT_TURN_THRESHOLD = parseInt(process.env.NEO_AUTO_COMPACT_TURNS ?? '15', 10);
 const COMPACT_KEEP_RECENT = 20; // keep last N messages verbatim
@@ -268,6 +269,7 @@ async function runCompact(): Promise<void> {
   }
 
   compactedContext = parts.join('\n');
+  lastCompactionInfo = { summarized: olderMessages.length, kept: recentMessages.length };
 
   // Break SDK session — next turn starts fresh with compacted context
   s.sdkSessionId = undefined;
@@ -346,6 +348,7 @@ async function autoCompactIfNeeded(): Promise<void> {
   const beforeTokens = s.totalInputTokens + s.totalOutputTokens;
   compactedContext = parts.join('\n');
   const afterEstimate = Math.ceil(compactedContext.length / 4);
+  lastCompactionInfo = { summarized: olderMessages.length, kept: COMPACT_KEEP_RECENT };
 
   // Break SDK session
   s.sdkSessionId = undefined;
@@ -655,6 +658,7 @@ rl.on('line', async (line) => {
         durationMs,
         ctx.modelUsed,
         route.score,
+        lastCompactionInfo,
       ),
     );
     console.log();
