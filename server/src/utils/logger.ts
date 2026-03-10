@@ -18,7 +18,7 @@
 import dgram from 'dgram';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 // ─── Log Levels ─────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ const config: LoggerConfig = {
 
 // Ensure log directory exists
 if (config.logFile) {
-  const dir = join(config.logFile, '..');
+  const dir = dirname(config.logFile);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }

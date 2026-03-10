@@ -8,6 +8,7 @@ import 'dotenv/config';
 import express from 'express';
 import { join } from 'path';
 import { closeDb, getDb } from './db/connection.js';
+import { getErrorMessage } from './utils/errors.js';
 import { startLogRelay } from './utils/log-relay.js';
 import {
   MATRIX_DIVIDER,
@@ -126,7 +127,7 @@ async function main(): Promise<void> {
       const completed = await orchestrator.executeTeam(team);
       res.json(completed);
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: getErrorMessage(err) });
     }
   });
 
