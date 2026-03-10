@@ -41,7 +41,9 @@ export function attachStreamHandler(
   bridge: ClaudeBridge,
   ctx: StreamContext,
   spinner: ReturnType<typeof setInterval>,
+  agentName = 'neo',
 ): void {
+  const agentPrefix = `\r\x1b[K${color.neonCyan(color.bold(agentName))} ${color.electricBlue('▸')} ${R}`;
   bridge.on('stream', (msg: any) => {
     if (msg.type === 'assistant') {
       if (msg.message?.model) ctx.modelUsed = msg.message.model;
@@ -53,15 +55,11 @@ export function attachStreamHandler(
             if (!ctx.firstToken) {
               ctx.firstToken = true;
               clearInterval(spinner);
-              process.stdout.write(
-                `\r\x1b[K${color.neonCyan(color.bold('neo'))} ${color.electricBlue('▸')} ${R}`,
-              );
+              process.stdout.write(agentPrefix);
             } else if (ctx.toolActive) {
               // Returning from tool use → fresh line with prompt
               ctx.toolActive = false;
-              process.stdout.write(
-                `\r\x1b[K${color.neonCyan(color.bold('neo'))} ${color.electricBlue('▸')} ${R}`,
-              );
+              process.stdout.write(agentPrefix);
             }
             process.stdout.write(block.text);
             ctx.fullResponse += block.text;

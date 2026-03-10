@@ -82,6 +82,7 @@ export function buildBanner(): string {
   );
 }
 
-export function buildPrompt(sessionId: string): string {
-  return `${color.dim('[')}${color.neonCyan(sessionId)}${color.dim(']')} ${gradient('you ▸ ', [0, 255, 65], [200, 255, 200])}${R}`;
+export function buildPrompt(sessionId: string, userName?: string): string {
+  const name = userName ?? 'you';
+  return `${color.dim('[')}${color.neonCyan(sessionId)}${color.dim(']')} ${gradient(`${name} ▸ `, [0, 255, 65], [200, 255, 200])}${R}`;
 }

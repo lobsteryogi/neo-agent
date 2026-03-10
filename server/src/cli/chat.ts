@@ -124,10 +124,13 @@ console.log(buildBanner());
 console.log(`  ${sessionInfo(sessionMgr.current)}`);
 console.log();
 
+const USER_NAME = promptDeps.userName;
+const AGENT_NAME = promptDeps.agentName;
+
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
-  prompt: buildPrompt('default'),
+  prompt: buildPrompt('default', USER_NAME),
 });
 
 let streaming = false;
@@ -224,7 +227,7 @@ async function processInput(input: string): Promise<void> {
       }
     }, 80);
 
-    attachStreamHandler(bridge, ctx, spinner);
+    attachStreamHandler(bridge, ctx, spinner, AGENT_NAME);
 
     // Dynamic timeout
     const timeoutMs =
@@ -327,7 +330,7 @@ async function processInput(input: string): Promise<void> {
     if (!result.success && runOpts.resumeSessionId) {
       log.debug('Resume failed, retrying as fresh conversation');
       bridge.removeAllListeners('stream');
-      attachStreamHandler(bridge, ctx, spinner);
+      attachStreamHandler(bridge, ctx, spinner, AGENT_NAME);
       delete runOpts.resumeSessionId;
       sessionMgr.current.sdkSessionId = undefined;
       result = await bridge.run(sanitized.content, runOpts);
@@ -346,7 +349,7 @@ async function processInput(input: string): Promise<void> {
       );
       log.debug('Timeout detected, auto-retrying', { originalMaxTurns: runOpts.maxTurns });
       bridge.removeAllListeners('stream');
-      attachStreamHandler(bridge, ctx, spinner);
+      attachStreamHandler(bridge, ctx, spinner, AGENT_NAME);
       const retryOpts = {
         ...runOpts,
         maxTurns: Math.max(1, Math.ceil((runOpts.maxTurns ?? 10) / 2)),
@@ -364,7 +367,7 @@ async function processInput(input: string): Promise<void> {
     // If nothing was streamed, print the result
     if (!ctx.fullResponse && result.success) {
       process.stdout.write(
-        `\r\x1b[K${color.neonCyan(color.bold('neo'))} ${color.electricBlue('▸')} ${R}`,
+        `\r\x1b[K${color.neonCyan(color.bold(AGENT_NAME))} ${color.electricBlue('▸')} ${R}`,
       );
       const content = (result.data as any)?.content ?? '';
       process.stdout.write(content);
@@ -551,7 +554,7 @@ rl.on('line', async (line) => {
       inMultilineBlock = false;
       const input = pendingLines.join('\n').trim();
       pendingLines = [];
-      rl.setPrompt(buildPrompt(sessionMgr.current.id));
+      rl.setPrompt(buildPrompt(sessionMgr.current.id, USER_NAME));
       if (!input) {
         rl.prompt();
         return;
@@ -581,7 +584,7 @@ rl.on('line', async (line) => {
     pendingLines.push(line);
     const input = pendingLines.join('\n').trim();
     pendingLines = [];
-    rl.setPrompt(buildPrompt(sessionMgr.current.id));
+    rl.setPrompt(buildPrompt(sessionMgr.current.id, USER_NAME));
     if (!input) {
       rl.prompt();
       return;
