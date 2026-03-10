@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { KANBAN_COLUMNS, type KanbanTask, type TaskStatus } from '@neo-agent/shared';
 import {
   DndContext,
@@ -16,6 +16,8 @@ import TaskCard from './TaskCard';
 import TaskCreateForm from './TaskCreateForm';
 import { useTaskStore } from '../stores/task-store';
 
+const STATUS_IDS = new Set(KANBAN_COLUMNS.map((c) => c.id as string));
+
 export default function KanbanBoard() {
   const tasks = useTaskStore((s) => s.tasks);
   const moveTask = useTaskStore((s) => s.moveTask);
@@ -24,18 +26,25 @@ export default function KanbanBoard() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const tasksByColumn = (status: TaskStatus) =>
-    tasks.filter((t) => t.status === status).sort((a, b) => a.position - b.position);
-
-  function findContainer(id: string): TaskStatus | undefined {
-    // Check if it's a column ID
-    if (['backlog', 'in_progress', 'review', 'done'].includes(id)) {
-      return id as TaskStatus;
+  // Memoize sorted tasks per column — recomputed only when tasks change
+  const columnTasks = useMemo(() => {
+    const map = new Map<TaskStatus, KanbanTask[]>();
+    for (const col of KANBAN_COLUMNS) {
+      map.set(
+        col.id,
+        tasks.filter((t) => t.status === col.id).sort((a, b) => a.position - b.position),
+      );
     }
-    // Find the task's column
-    const task = tasks.find((t) => t.id === id);
-    return task?.status;
-  }
+    return map;
+  }, [tasks]);
+
+  const findContainer = useCallback(
+    (id: string): TaskStatus | undefined => {
+      if (STATUS_IDS.has(id)) return id as TaskStatus;
+      return tasks.find((t) => t.id === id)?.status;
+    },
+    [tasks],
+  );
 
   function handleDragStart(event: DragStartEvent) {
     const task = tasks.find((t) => t.id === event.active.id);
@@ -54,13 +63,13 @@ export default function KanbanBoard() {
     let destStatus = findContainer(overId);
 
     // If dropped on column itself (empty column case)
-    if (['backlog', 'in_progress', 'review', 'done'].includes(overId)) {
+    if (STATUS_IDS.has(overId)) {
       destStatus = overId as TaskStatus;
     }
 
     if (!sourceStatus || !destStatus) return;
 
-    const destTasks = tasksByColumn(destStatus);
+    const destTasks = columnTasks.get(destStatus) ?? [];
 
     if (sourceStatus === destStatus && activeId === overId) return;
 
@@ -117,7 +126,7 @@ export default function KanbanBoard() {
               key={col.id}
               id={col.id}
               label={col.label}
-              tasks={tasksByColumn(col.id)}
+              tasks={columnTasks.get(col.id) ?? []}
               onAddClick={col.id === 'backlog' ? () => setShowCreate(true) : undefined}
             />
           ))}

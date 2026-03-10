@@ -68,7 +68,12 @@ export interface UpdateTaskInput {
 export class TaskRepo {
   constructor(private db: Database.Database) {}
 
-  list(filters?: { status?: TaskStatus; search?: string }): KanbanTask[] {
+  list(filters?: {
+    status?: TaskStatus;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): KanbanTask[] {
     try {
       let sql = 'SELECT * FROM tasks';
       const conditions: string[] = [];
@@ -88,6 +93,11 @@ export class TaskRepo {
         sql += ' WHERE ' + conditions.join(' AND ');
       }
       sql += ' ORDER BY status, position ASC';
+
+      const limit = Math.min(filters?.limit ?? 200, 500);
+      const offset = filters?.offset ?? 0;
+      sql += ' LIMIT ? OFFSET ?';
+      params.push(limit, offset);
 
       const rows = this.db.prepare(sql).all(...params) as TaskRow[];
       return rows.map(rowToTask);

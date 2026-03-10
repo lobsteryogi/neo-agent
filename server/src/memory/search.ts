@@ -38,9 +38,11 @@ export class MemorySearch {
     // Tier 4: FTS5 long-term memories
     if (sources.includes('long-term')) {
       const fts = this.longTerm.searchFTS(query, limit);
+      // Batch touch for decay tracking (single UPDATE instead of N)
+      if (fts.length > 0) {
+        this.longTerm.touchBulk(fts.map((r) => r.id));
+      }
       for (const r of fts) {
-        // Touch each accessed memory for decay tracking
-        this.longTerm.touch(r.id);
         results.push({
           content: r.content,
           source: 'long-term',

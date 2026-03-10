@@ -10,6 +10,7 @@
 import type { FadeCheck, HandoffSnapshot, ModelTier } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
+import { safeJsonParse } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { SessionTranscript } from './session-transcript.js';
 
@@ -82,7 +83,7 @@ export class SessionHandoff {
       )
       .get(sessionId) as { snapshot: string } | undefined;
 
-    return row ? JSON.parse(row.snapshot) : null;
+    return row ? safeJsonParse<HandoffSnapshot | null>(row.snapshot, null) : null;
   }
 
   getRecentHandoffs(limit = 3): HandoffSnapshot[] {
@@ -90,7 +91,9 @@ export class SessionHandoff {
       .prepare('SELECT snapshot FROM handoffs ORDER BY created_at DESC LIMIT ?')
       .all(limit) as { snapshot: string }[];
 
-    return rows.map((r) => JSON.parse(r.snapshot));
+    return rows
+      .map((r) => safeJsonParse<HandoffSnapshot | null>(r.snapshot, null))
+      .filter((s): s is HandoffSnapshot => s !== null);
   }
 
   private captureSnapshot(session: { id: string }): HandoffSnapshot {

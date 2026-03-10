@@ -68,6 +68,15 @@ export class LongTermMemory {
     this.db.prepare('UPDATE memories SET accessed_at = ? WHERE id = ?').run(Date.now(), memoryId);
   }
 
+  touchBulk(memoryIds: string[]): void {
+    if (memoryIds.length === 0) return;
+    const now = Date.now();
+    const placeholders = memoryIds.map(() => '?').join(',');
+    this.db
+      .prepare(`UPDATE memories SET accessed_at = ? WHERE id IN (${placeholders})`)
+      .run(now, ...memoryIds);
+  }
+
   getRecent(limit = 10): MemoryEntry[] {
     return this.db
       .prepare('SELECT * FROM memories ORDER BY accessed_at DESC LIMIT ?')
@@ -82,10 +91,10 @@ export class LongTermMemory {
       .all(type, limit) as MemoryEntry[];
   }
 
-  getAll(): MemoryEntry[] {
+  getAll(limit = 1000): MemoryEntry[] {
     return this.db
-      .prepare('SELECT * FROM memories ORDER BY accessed_at DESC')
-      .all() as MemoryEntry[];
+      .prepare('SELECT * FROM memories ORDER BY accessed_at DESC LIMIT ?')
+      .all(limit) as MemoryEntry[];
   }
 
   count(): number {

@@ -42,16 +42,19 @@ export class OperationalMemory {
     if (!existsSync(this.storiesDir)) return [];
 
     const files = readdirSync(this.storiesDir).filter((f) => f.endsWith('.md'));
-    return files.map((f) => {
-      const content = readFileSync(join(this.storiesDir, f), 'utf-8');
-      const { title, tags } = this.parseStoryFrontmatter(content);
-      const story: Story = { filename: f, title, tags, content };
-
-      // Track in DB
-      this.trackStory(story);
-
-      return story;
-    });
+    const stories: Story[] = [];
+    for (const f of files) {
+      try {
+        const content = readFileSync(join(this.storiesDir, f), 'utf-8');
+        const { title, tags } = this.parseStoryFrontmatter(content);
+        const story: Story = { filename: f, title, tags, content };
+        this.trackStory(story);
+        stories.push(story);
+      } catch {
+        // Skip files that fail to read or parse
+      }
+    }
+    return stories;
   }
 
   private trackStory(story: Story): void {

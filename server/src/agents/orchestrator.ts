@@ -24,6 +24,7 @@ import type {
 } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
+import { safeJsonParse } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import type { AgentRegistry } from './registry.js';
 import type { SubAgentSpawner } from './spawner.js';
@@ -172,16 +173,7 @@ export class Orchestrator {
 
     if (!row) return undefined;
 
-    return {
-      id: row.id as string,
-      pattern: row.pattern as OrchestrationPattern,
-      tasks: JSON.parse(row.agents as string) as SubAgentTask[],
-      status: row.status as AgentTeam['status'],
-      results: row.results ? (JSON.parse(row.results as string) as SubAgentResult[]) : [],
-      parentSession: row.parent_session as string | undefined,
-      createdAt: row.created_at as number,
-      completedAt: row.completed_at as number | undefined,
-    };
+    return this.rowToTeam(row);
   }
 
   /**
@@ -192,16 +184,20 @@ export class Orchestrator {
       .prepare('SELECT * FROM agent_teams ORDER BY created_at DESC')
       .all() as Record<string, unknown>[];
 
-    return rows.map((row) => ({
+    return rows.map((row) => this.rowToTeam(row));
+  }
+
+  private rowToTeam(row: Record<string, unknown>): AgentTeam {
+    return {
       id: row.id as string,
       pattern: row.pattern as OrchestrationPattern,
-      tasks: JSON.parse(row.agents as string) as SubAgentTask[],
+      tasks: safeJsonParse(row.agents as string, [] as SubAgentTask[]),
       status: row.status as AgentTeam['status'],
-      results: row.results ? (JSON.parse(row.results as string) as SubAgentResult[]) : [],
+      results: row.results ? safeJsonParse(row.results as string, [] as SubAgentResult[]) : [],
       parentSession: row.parent_session as string | undefined,
       createdAt: row.created_at as number,
       completedAt: row.completed_at as number | undefined,
-    }));
+    };
   }
 
   // ── Pattern Implementations ──────────────────────────────────

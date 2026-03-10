@@ -430,8 +430,8 @@ async function processInput(input: string): Promise<void> {
       log.debug('Memory extraction failed', { error: String(err) });
     }
 
-    // Auto-compact if we've hit the turn threshold
-    await compaction.autoCompactIfNeeded();
+    // Auto-compact if we've hit the turn threshold (fire-and-forget to not block REPL)
+    compaction.autoCompactIfNeeded().catch((err) => log.error('Auto-compact failed', err));
 
     // Cost budget warning
     if (COST_BUDGET > 0 && s.totalCost > COST_BUDGET) {
