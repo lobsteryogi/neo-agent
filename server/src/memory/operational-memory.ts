@@ -11,6 +11,7 @@ import type Database from 'better-sqlite3';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { nanoid } from 'nanoid';
 import { join } from 'path';
+import { parseFrontmatter } from '../utils/frontmatter.js';
 
 export interface Story {
   filename: string;
@@ -43,7 +44,7 @@ export class OperationalMemory {
     const files = readdirSync(this.storiesDir).filter((f) => f.endsWith('.md'));
     return files.map((f) => {
       const content = readFileSync(join(this.storiesDir, f), 'utf-8');
-      const { title, tags } = this.parseFrontmatter(content);
+      const { title, tags } = this.parseStoryFrontmatter(content);
       const story: Story = { filename: f, title, tags, content };
 
       // Track in DB
@@ -84,21 +85,22 @@ export class OperationalMemory {
     return score;
   }
 
-  private parseFrontmatter(content: string): { title: string; tags: string[] } {
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontmatterMatch) {
+  private parseStoryFrontmatter(content: string): { title: string; tags: string[] } {
+    const { frontmatter } = parseFrontmatter(content);
+
+    if (!frontmatter.title && !frontmatter.tags) {
       // Fallback: use first heading as title
       const headingMatch = content.match(/^#\s+(.+)/m);
       return { title: headingMatch?.[1] ?? 'Untitled', tags: [] };
     }
 
-    const fm = frontmatterMatch[1];
-    const titleMatch = fm.match(/title:\s*(.+)/);
-    const tagsMatch = fm.match(/tags:\s*\[([^\]]*)\]/);
+    const tags = Array.isArray(frontmatter.tags)
+      ? frontmatter.tags.map((t: string) => t.replace(/['"]/g, ''))
+      : [];
 
     return {
-      title: titleMatch?.[1]?.trim() ?? 'Untitled',
-      tags: tagsMatch?.[1] ? tagsMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, '')) : [],
+      title: frontmatter.title?.trim() ?? 'Untitled',
+      tags,
     };
   }
 }

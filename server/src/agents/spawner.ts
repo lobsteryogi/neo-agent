@@ -13,6 +13,7 @@ import type {
   SubAgentResult,
   SubAgentTask,
 } from '@neo-agent/shared';
+import { getErrorMessage } from '../utils/errors.js';
 import type { ClaudeBridge } from '../core/claude-bridge.js';
 import { logger } from '../utils/logger.js';
 import { AgentWorkspace, type IsolatedWorkspace } from './workspace.js';
@@ -95,7 +96,7 @@ export class SubAgentSpawner {
         agent: blueprint.name,
         taskId: task.id,
         durationMs,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       });
       return {
         agentName: blueprint.name,
@@ -103,7 +104,7 @@ export class SubAgentSpawner {
         success: false,
         output: null,
         durationMs,
-        error: err instanceof Error ? err.message : String(err),
+        error: getErrorMessage(err),
       };
     } finally {
       // Cleanup workspace after collecting artifacts

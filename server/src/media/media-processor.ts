@@ -12,6 +12,7 @@
  */
 
 import type { InboundMessage } from '@neo-agent/shared';
+import { getErrorMessage } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { DocumentReader } from './document-reader.js';
 import { VisionAnalyzer } from './vision-analyzer.js';
@@ -138,9 +139,7 @@ export class MediaProcessor {
         }
       } catch (err) {
         log.warn(`Media processing failed for ${attachment.type}`, { error: String(err) });
-        contentParts.push(
-          `[Failed to process ${attachment.type}: ${err instanceof Error ? err.message : String(err)}]`,
-        );
+        contentParts.push(`[Failed to process ${attachment.type}: ${getErrorMessage(err)}]`);
       }
     }
 

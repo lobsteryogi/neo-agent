@@ -9,6 +9,7 @@
  */
 
 import { execSync } from 'child_process';
+import { getErrorMessage } from '../utils/errors.js';
 
 export class MatrixSync {
   private interval?: ReturnType<typeof setInterval>;
@@ -39,8 +40,7 @@ export class MatrixSync {
       this.exec('git pull --rebase');
       return { success: true };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { success: false, error: message };
+      return { success: false, error: getErrorMessage(err) };
     } finally {
       this.syncing = false;
     }

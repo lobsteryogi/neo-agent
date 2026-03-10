@@ -11,6 +11,7 @@
  * The daemon auto-starts on first command and stays alive for the session.
  */
 
+import { getErrorMessage } from '../utils/errors.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { logger } from '../utils/logger.js';
@@ -100,7 +101,7 @@ export class AgentBrowser {
       return { success: true, output, durationMs };
     } catch (err: unknown) {
       const durationMs = Date.now() - start;
-      const errMsg = err instanceof Error ? err.message : String(err);
+      const errMsg = getErrorMessage(err);
       const stderr = (err as any)?.stderr || '';
       const stdout = (err as any)?.stdout || '';
 

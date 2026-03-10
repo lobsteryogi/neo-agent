@@ -10,6 +10,7 @@
  */
 
 import type { ToolHealth } from '@neo-agent/shared';
+import { getErrorMessage } from '../utils/errors.js';
 import { execSync } from 'child_process';
 import { AgentBrowser } from '../browser/agent-browser.js';
 import { logger } from '../utils/logger.js';
@@ -49,7 +50,7 @@ export class BrowserTool implements ToolIntegration {
       log.debug('agent-browser health: available');
       return { available: true };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getErrorMessage(err);
       log.debug('agent-browser health: unavailable', { error: msg });
       return {
         available: false,

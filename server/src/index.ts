@@ -21,7 +21,7 @@ import {
 } from './utils/terminal.js';
 
 const PORT = Number(process.env.NEO_PORT) || 3141;
-const USER_NAME = process.env.NEO_USER_NAME || 'Neo';
+const USER_NAME = process.env.NEO_USER_NAME || 'Human';
 const AGENT_NAME = process.env.NEO_AGENT_NAME || 'Neo';
 
 async function main(): Promise<void> {
@@ -126,8 +126,7 @@ async function main(): Promise<void> {
       const completed = await orchestrator.executeTeam(team);
       res.json(completed);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: message });
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
@@ -150,21 +149,23 @@ async function main(): Promise<void> {
     const agent = new NeoAgent(db, {
       agentName: AGENT_NAME,
       userName: USER_NAME,
-      workspacePath: process.env.NEO_WORKSPACE || join(process.cwd(), 'workspace'),
+      workspacePath: process.env.NEO_WORKSPACE_PATH || './workspace',
       defaultModel: (process.env.NEO_DEFAULT_MODEL || 'sonnet') as 'haiku' | 'sonnet' | 'opus',
       gatePhrase: process.env.NEO_GATE_PHRASE || 'do it',
-      protectedPaths: (process.env.NEO_PROTECTED_PATHS || '').split(',').filter(Boolean),
+      protectedPaths: (process.env.NEO_PROTECTED_PATHS || '~/.ssh/,~/.gnupg/,.env')
+        .split(',')
+        .filter(Boolean),
       permissionMode: process.env.NEO_PERMISSION_MODE || 'default',
       fadeThreshold: Number(process.env.NEO_FADE_THRESHOLD || '0.85'),
       port: PORT,
       wsPort: Number(process.env.NEO_WS_PORT) || 3142,
       wsToken: process.env.NEO_WS_TOKEN || 'change-me',
       dbPath: process.env.NEO_DB_PATH || join(process.cwd(), 'data', 'neo.db'),
-      personalityIntensity: process.env.NEO_PERSONALITY || 'medium',
+      personalityIntensity: process.env.NEO_PERSONALITY_INTENSITY || 'full-existential-crisis',
       verbosity: (process.env.NEO_VERBOSITY || 'balanced') as 'concise' | 'balanced' | 'detailed',
       dailyLogCron: process.env.NEO_DAILY_LOG_CRON || '0 23 * * *',
-      maxStories: Number(process.env.NEO_MAX_STORIES || '3'),
-      routingProfile: (process.env.NEO_ROUTING_PROFILE || 'balanced') as
+      maxStories: Number(process.env.NEO_MAX_STORIES || '5'),
+      routingProfile: (process.env.NEO_ROUTING_PROFILE || 'auto') as
         | 'auto'
         | 'eco'
         | 'balanced'
@@ -179,7 +180,7 @@ async function main(): Promise<void> {
     const tgSessionMgr = new SessionManager(db);
     const tgMemory = new LongTermMemory(db);
     const tgSearch = new MemorySearch(db);
-    let tgRoutingProfile = (process.env.NEO_ROUTING_PROFILE || 'balanced') as
+    let tgRoutingProfile = (process.env.NEO_ROUTING_PROFILE || 'auto') as
       | 'auto'
       | 'eco'
       | 'balanced'

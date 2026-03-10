@@ -58,7 +58,11 @@ export class FileGuard implements Gate {
     const normalized = path.toLowerCase();
     return this.protectedPaths.some((pp) => {
       const p = pp.toLowerCase();
-      return normalized.includes(p) || normalized.startsWith(p);
+      // Directory pattern (e.g. ~/.ssh/): check if path contains this directory
+      if (p.endsWith('/')) return normalized.includes(p);
+      // File pattern (e.g. .env): check if any path segment starts with the pattern
+      const segments = normalized.split('/');
+      return segments.some((seg) => seg === p || seg.startsWith(p));
     });
   }
 }

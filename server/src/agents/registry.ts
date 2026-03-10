@@ -11,6 +11,7 @@
 import type { AgentBlueprint } from '@neo-agent/shared';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { basename, dirname, join } from 'path';
+import { parseFrontmatter } from '../utils/frontmatter.js';
 
 export class AgentRegistry {
   private blueprints = new Map<string, AgentBlueprint>();
@@ -60,35 +61,13 @@ export class AgentRegistry {
 
   private parseAgentMd(path: string): AgentBlueprint {
     const raw = readFileSync(path, 'utf-8');
-    const fenceRegex = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/;
-    const match = raw.match(fenceRegex);
-
-    const frontmatter: Record<string, string> = {};
-    if (match) {
-      for (const line of match[1].split('\n')) {
-        const colonIdx = line.indexOf(':');
-        if (colonIdx === -1) continue;
-        const key = line.slice(0, colonIdx).trim();
-        const value = line.slice(colonIdx + 1).trim();
-        if (key) frontmatter[key] = value;
-      }
-    }
-
-    const body = match ? match[2].trim() : raw.trim();
+    const { frontmatter, body } = parseFrontmatter(raw);
     const dirName = basename(dirname(path));
 
-    // Parse allowedTools from YAML array format: [tool1, tool2]
-    let allowedTools: string[] | undefined;
-    if (frontmatter.allowedTools) {
-      const val = frontmatter.allowedTools;
-      if (val.startsWith('[') && val.endsWith(']')) {
-        allowedTools = val
-          .slice(1, -1)
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
-      }
-    }
+    // allowedTools is already parsed as an array by parseFrontmatter
+    const allowedTools: string[] | undefined = Array.isArray(frontmatter.allowedTools)
+      ? frontmatter.allowedTools
+      : undefined;
 
     // Read companion CLAUDE.md if present
     const claudeMdPath = join(dirname(path), 'CLAUDE.md');
@@ -97,7 +76,7 @@ export class AgentRegistry {
     return {
       name: frontmatter.name ?? dirName,
       description: frontmatter.description ?? '',
-      systemPrompt: body,
+      systemPrompt: body.trim(),
       allowedTools,
       maxTurns: frontmatter.maxTurns ? Number(frontmatter.maxTurns) : undefined,
       timeoutMs: frontmatter.timeoutMs ? Number(frontmatter.timeoutMs) : undefined,

@@ -8,6 +8,7 @@
  */
 
 import { readFile } from 'fs/promises';
+import { getErrorMessage } from '../utils/errors.js';
 import path from 'path';
 
 const TEXT_EXTENSIONS = new Set([
@@ -70,7 +71,7 @@ export class DocumentReader {
         const data = await pdfParse(buffer);
         return data.text;
       } catch (err) {
-        return `[PDF parse error: ${err instanceof Error ? err.message : String(err)}]`;
+        return `[PDF parse error: ${getErrorMessage(err)}]`;
       }
     }
 

@@ -9,6 +9,7 @@
 
 import type { ClaudeBridgeOptions, ClaudeResult, SDKStreamMessage } from '@neo-agent/shared';
 import { EventEmitter } from 'events';
+import { getErrorMessage } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
 const log = logger('bridge');
@@ -68,7 +69,9 @@ export class ClaudeBridge extends EventEmitter {
 
       // Create an abort promise that rejects when the controller fires
       const abortPromise = new Promise<never>((_, reject) => {
-        controller.signal.addEventListener('abort', () => reject(new Error('ABORT_SIGNAL')));
+        controller.signal.addEventListener('abort', () => reject(new Error('ABORT_SIGNAL')), {
+          once: true,
+        });
       });
 
       // Race the iteration against the abort signal
@@ -178,7 +181,7 @@ export class ClaudeBridge extends EventEmitter {
         },
       };
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
+      const errMsg = getErrorMessage(err);
       if (controller.signal.aborted || errMsg === 'ABORT_SIGNAL') {
         log.warn('Bridge.run timeout', { timeoutMs, error: errMsg });
         return {
