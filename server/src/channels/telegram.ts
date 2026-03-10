@@ -123,6 +123,7 @@ export class TelegramChannel implements ChannelAdapter {
     // Photos — Telegram sends multiple sizes, use the largest
     this.bot.on('message:photo', async (ctx) => {
       const photos = ctx.message.photo;
+      if (!photos || photos.length === 0) return;
       const largest = photos[photos.length - 1];
       const attachment = await this.downloadTelegramFile(ctx, {
         fileId: largest.file_id,

@@ -8,8 +8,9 @@
  * 2. Manual — create SKILL.md from provided content
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { ensureDir } from '../utils/fs.js';
 import type { ClawHubSkillMeta } from './clawhub.js';
 import { ClawHubClient } from './clawhub.js';
 import type { SkillRegistry } from './registry.js';
@@ -54,13 +55,13 @@ export class SkillLearner {
       throw new Error(`Skill "${slug}" not found on ClawHub`);
     }
 
-    mkdirSync(skillDir, { recursive: true });
+    ensureDir(skillDir);
 
     for (const file of bundle.files) {
       const filePath = join(skillDir, file.name);
       const fileDir = join(skillDir, ...file.name.split('/').slice(0, -1));
       if (fileDir !== skillDir) {
-        mkdirSync(fileDir, { recursive: true });
+        ensureDir(fileDir);
       }
       writeFileSync(filePath, file.content);
     }
@@ -81,7 +82,7 @@ export class SkillLearner {
       throw new Error(`Skill "${opts.name}" already exists at ${skillDir}`);
     }
 
-    mkdirSync(skillDir, { recursive: true });
+    ensureDir(skillDir);
 
     const tags = opts.tags ?? ['acquired', 'auto'];
     const frontmatter = [

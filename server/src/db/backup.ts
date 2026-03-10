@@ -7,16 +7,15 @@
  */
 
 import type Database from 'better-sqlite3';
-import { existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
+import { existsSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { ensureDir } from '../utils/fs.js';
 import { logger } from '../utils/logger.js';
 
 const log = logger('backup');
 
 export function runBackup(db: Database.Database, backupDir: string): Promise<string> {
-  if (!existsSync(backupDir)) {
-    mkdirSync(backupDir, { recursive: true });
-  }
+  ensureDir(backupDir);
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const dest = join(backupDir, `neo-${timestamp}.db`);

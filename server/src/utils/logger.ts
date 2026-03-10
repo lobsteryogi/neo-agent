@@ -16,9 +16,10 @@
  */
 
 import dgram from 'dgram';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
+import { ensureDir } from './fs.js';
 
 // ─── Log Levels ─────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ const LEVEL_PRIORITY: Record<LogLevel, number> = {
   error: 3,
 };
 
-const LEVEL_COLORS: Record<LogLevel, string> = {
+export const LEVEL_COLORS: Record<LogLevel, string> = {
   debug: '\x1b[2m', // dim
   info: '\x1b[32m', // green
   warn: '\x1b[33m', // yellow
@@ -62,10 +63,7 @@ const config: LoggerConfig = {
 
 // Ensure log directory exists
 if (config.logFile) {
-  const dir = dirname(config.logFile);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
+  ensureDir(dirname(config.logFile));
 }
 
 // ─── Ring Buffer (captures ALL entries regardless of log level) ──

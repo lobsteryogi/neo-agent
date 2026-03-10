@@ -101,7 +101,18 @@ export class DailyLog {
       | undefined;
 
     if (!row) return null;
+    return DailyLog.rowToEntry(row);
+  }
 
+  getRecentLogs(limit = 7): DailyLogEntry[] {
+    const rows = this.db
+      .prepare('SELECT * FROM daily_logs ORDER BY date DESC LIMIT ?')
+      .all(limit) as any[];
+
+    return rows.map(DailyLog.rowToEntry);
+  }
+
+  private static rowToEntry(row: any): DailyLogEntry {
     return {
       id: row.id,
       date: row.date,
@@ -111,22 +122,6 @@ export class DailyLog {
       learnings: JSON.parse(row.learnings || '[]'),
       created_at: row.created_at,
     };
-  }
-
-  getRecentLogs(limit = 7): DailyLogEntry[] {
-    const rows = this.db
-      .prepare('SELECT * FROM daily_logs ORDER BY date DESC LIMIT ?')
-      .all(limit) as any[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      date: row.date,
-      summary: row.summary,
-      decisions: JSON.parse(row.decisions || '[]'),
-      blockers: JSON.parse(row.blockers || '[]'),
-      learnings: JSON.parse(row.learnings || '[]'),
-      created_at: row.created_at,
-    }));
   }
 
   private extractByPattern(

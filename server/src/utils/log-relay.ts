@@ -10,15 +10,9 @@
 
 import dgram from 'dgram';
 import type { LogEntry } from './logger.js';
+import { LEVEL_COLORS } from './logger.js';
 
 const RELAY_PORT = Number(process.env.NEO_LOG_RELAY_PORT) || 3143;
-
-const LEVEL_COLORS: Record<string, string> = {
-  debug: '\x1b[2m',
-  info: '\x1b[32m',
-  warn: '\x1b[33m',
-  error: '\x1b[31m',
-};
 const RESET = '\x1b[0m';
 
 function formatRelayEntry(entry: LogEntry): string {

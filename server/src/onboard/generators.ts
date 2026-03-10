@@ -13,8 +13,9 @@
 import * as clack from '@clack/prompts';
 import type { WizardAnswers } from '@neo-agent/shared';
 import { randomBytes } from 'crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
-import { dirname, join, relative } from 'path';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { ensureDir } from '../utils/fs.js';
 import { fileURLToPath } from 'url';
 
 import { closeDb, getDb } from '../db/connection.js';
@@ -23,7 +24,7 @@ import { closeDb, getDb } from '../db/connection.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const TEMPLATES_DIR = join(__dirname, '..', 'src', 'onboard', 'templates');
+const TEMPLATES_DIR = join(__dirname, 'templates');
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ function writeIfNotExists(path: string, content: string): boolean {
 function ensureDirectories(workspacePath: string): void {
   const dirs = ['stories', 'skills', 'agents', '.claude'];
   for (const dir of dirs) {
-    mkdirSync(join(workspacePath, dir), { recursive: true });
+    ensureDir(join(workspacePath, dir));
   }
 }
 
@@ -156,7 +157,7 @@ function generateAgentBlueprints(workspacePath: string, templatesDir: string): G
   for (const agentName of agentDirs) {
     const srcDir = join(agentsTemplateDir, agentName);
     const destDir = join(agentsDestDir, agentName);
-    mkdirSync(destDir, { recursive: true });
+    ensureDir(destDir);
 
     const files = readdirSync(srcDir).filter((f) => f.endsWith('.md'));
     for (const file of files) {
@@ -266,7 +267,7 @@ export function generateWorkspaceFiles(
 
 export function generateClaudeSettings(answers: WizardAnswers, workspacePath: string): void {
   const claudeDir = join(workspacePath, '.claude');
-  mkdirSync(claudeDir, { recursive: true });
+  ensureDir(claudeDir);
 
   const settings = {
     permissions: {

@@ -6,6 +6,7 @@
 
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
+import { getErrorMessage } from '../utils/errors.js';
 
 export function registerRoutes(app: Express, db: Database.Database): void {
   // Sessions list
@@ -13,8 +14,8 @@ export function registerRoutes(app: Express, db: Database.Database): void {
     try {
       const sessions = db.prepare('SELECT * FROM sessions ORDER BY started_at DESC LIMIT 20').all();
       res.json(sessions);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    } catch (err) {
+      res.status(500).json({ error: getErrorMessage(err) });
     }
   });
 
@@ -23,8 +24,8 @@ export function registerRoutes(app: Express, db: Database.Database): void {
     try {
       const logs = db.prepare('SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 50').all();
       res.json(logs);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    } catch (err) {
+      res.status(500).json({ error: getErrorMessage(err) });
     }
   });
 
@@ -35,8 +36,8 @@ export function registerRoutes(app: Express, db: Database.Database): void {
         .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC')
         .all(req.params.id);
       res.json(messages);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    } catch (err) {
+      res.status(500).json({ error: getErrorMessage(err) });
     }
   });
 }
