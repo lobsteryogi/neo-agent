@@ -179,6 +179,33 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_agent_messages_team ON agent_messages(team_id, timestamp);
     `,
   },
+  {
+    version: 4,
+    name: 'kanban_tasks',
+    up: `
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'backlog'
+          CHECK(status IN ('backlog', 'in_progress', 'review', 'done')),
+        priority TEXT NOT NULL DEFAULT 'medium'
+          CHECK(priority IN ('low', 'medium', 'high', 'critical')),
+        position REAL NOT NULL DEFAULT 0,
+        labels TEXT NOT NULL DEFAULT '[]',
+        session_id TEXT,
+        team_id TEXT,
+        created_by TEXT NOT NULL DEFAULT 'user'
+          CHECK(created_by IN ('user', 'agent')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL,
+        FOREIGN KEY (team_id) REFERENCES agent_teams(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, position);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

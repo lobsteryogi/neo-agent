@@ -34,6 +34,11 @@ export function nowWithTz(): string {
   return now.toISOString().slice(0, 19) + `${sign}${pad(Math.floor(off / 60))}:${pad(off % 60)}`;
 }
 
+/** Replace {{placeholder}} tokens in workspace file content with runtime values. */
+function applyTemplateVars(content: string, vars: Record<string, string>): string {
+  return content.replace(/\{\{(\w+)\}\}/g, (match, key: string) => vars[key] ?? match);
+}
+
 // ─── Builder ──────────────────────────────────────────────────
 
 export interface SystemPromptDeps {
@@ -59,6 +64,7 @@ export function buildSystemPrompt(deps: SystemPromptDeps): string {
     browserAvailable,
   } = deps;
   const parts: string[] = [];
+  const templateVars: Record<string, string> = { agentName, userName };
 
   // Core identity
   parts.push(`You are ${agentName}, a personal AI agent for ${userName}.`);
@@ -83,7 +89,7 @@ export function buildSystemPrompt(deps: SystemPromptDeps): string {
   const agentsPath = join(workspace, 'AGENTS.md');
   if (existsSync(agentsPath)) {
     parts.push('## Operating Instructions');
-    parts.push(readFileSync(agentsPath, 'utf-8'));
+    parts.push(applyTemplateVars(readFileSync(agentsPath, 'utf-8'), templateVars));
     parts.push('');
   }
 
@@ -91,7 +97,7 @@ export function buildSystemPrompt(deps: SystemPromptDeps): string {
   const soulPath = join(workspace, 'SOUL.md');
   if (existsSync(soulPath)) {
     parts.push('## Soul & Personality');
-    parts.push(readFileSync(soulPath, 'utf-8'));
+    parts.push(applyTemplateVars(readFileSync(soulPath, 'utf-8'), templateVars));
     parts.push('');
   }
 
@@ -99,7 +105,7 @@ export function buildSystemPrompt(deps: SystemPromptDeps): string {
   const userPath = join(workspace, 'USER.md');
   if (existsSync(userPath)) {
     parts.push('## About Your Human');
-    parts.push(readFileSync(userPath, 'utf-8'));
+    parts.push(applyTemplateVars(readFileSync(userPath, 'utf-8'), templateVars));
     parts.push('');
   }
 

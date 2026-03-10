@@ -36,7 +36,11 @@ export class WebChannel implements ChannelAdapter {
 
   async start(): Promise<void> {
     this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-      const url = new URL(req.url!, `http://${req.headers.host}`);
+      if (!req.url) {
+        ws.close(4000, 'Invalid request');
+        return;
+      }
+      const url = new URL(req.url, `http://${req.headers.host}`);
       const token = url.searchParams.get('token');
       if (token !== this.wsToken) {
         ws.close(4001, 'Unauthorized');
@@ -70,6 +74,13 @@ export class WebChannel implements ChannelAdapter {
     }
     this.clients.clear();
     this.wss.close();
+  }
+
+  broadcast(event: { type: string; [key: string]: unknown }): void {
+    const payload = JSON.stringify(event);
+    for (const ws of this.clients.values()) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
   }
 
   async send(sessionId: string, response: AgentResponse): Promise<void> {

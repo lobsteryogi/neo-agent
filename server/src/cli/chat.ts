@@ -25,6 +25,7 @@ import { TaskClassifier } from '../router/classifier.js';
 import { RouterEngine } from '../router/engine.js';
 import { enableLogRelay, getRecentLogs, logger } from '../utils/logger.js';
 import { color, getSpinnerFrame } from '../utils/terminal.js';
+import { TaskRepo } from '../db/task-repo.js';
 import { handleCommand } from './lib/commands.js';
 import {
   buildBanner,
@@ -535,6 +536,7 @@ const commandDeps = {
   },
   exportTranscript,
   transcript,
+  taskRepo: new TaskRepo(db),
 };
 
 // ─── Main Loop ────────────────────────────────────────────────

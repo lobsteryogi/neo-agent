@@ -59,6 +59,13 @@ export const COMMANDS: CommandDef[] = [
   },
   { command: '/onboard', description: 'Re-configure agent', channels: ['cli'] },
   { command: '/clear', description: 'Clear terminal', channels: ['cli'] },
+  { command: '/tasks', description: 'List tasks by status', channels: ['cli', 'telegram'] },
+  {
+    command: '/task',
+    args: '<title>',
+    description: 'Quick-create task in backlog',
+    channels: ['cli', 'telegram'],
+  },
   { command: '/help', description: 'Show available commands', channels: ['cli', 'telegram'] },
   { command: '/exit', description: 'Disconnect from the Matrix', channels: ['cli'] },
 ];

@@ -195,10 +195,10 @@ export async function runWizard(): Promise<void> {
   );
 }
 
-// ─── Blue Pill (3 steps with defaults) ─────────────────────────
+// ─── Blue Pill (4 steps with defaults) ─────────────────────────
 
 async function runBluePill(): Promise<WizardAnswers> {
-  showStepHeader({ index: 2, total: 3, name: 'Identity', codename: 'Identity' });
+  showStepHeader({ index: 2, total: 4, name: 'Identity', codename: 'Identity' });
 
   const userName = await clack.text({
     message: 'What should I call you?',
@@ -208,7 +208,7 @@ async function runBluePill(): Promise<WizardAnswers> {
   if (clack.isCancel(userName)) process.exit(0);
 
   // Verify Claude CLI
-  showStepHeader({ index: 3, total: 3, name: 'Claude Link', codename: 'Claude Link' });
+  showStepHeader({ index: 3, total: 4, name: 'Claude Link', codename: 'Claude Link' });
 
   const s = clack.spinner();
   s.start('Checking for Claude CLI...');
@@ -230,11 +230,25 @@ async function runBluePill(): Promise<WizardAnswers> {
     if (clack.isCancel(cont) || !cont) process.exit(1);
   }
 
+  // Optional integrations (quick setup)
+  showStepHeader({ index: 4, total: 4, name: 'Phone Lines', codename: 'Phone Lines' });
+
+  const telegramBotToken = await clack.text({
+    message: '📱 Telegram bot token (optional):',
+    placeholder: 'Skip with Enter',
+    defaultValue: '',
+  });
+  if (clack.isCancel(telegramBotToken)) process.exit(0);
+
   clack.log.info(
     'Using sensible defaults for everything else. You can re-run with Red Pill anytime.',
   );
 
-  return { ...WIZARD_DEFAULTS, userName: userName as string };
+  return {
+    ...WIZARD_DEFAULTS,
+    userName: userName as string,
+    telegramBotToken: (telegramBotToken as string) || undefined,
+  };
 }
 
 // ─── Red Pill (Full 11-step config) ────────────────────────────

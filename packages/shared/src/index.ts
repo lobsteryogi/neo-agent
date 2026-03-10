@@ -333,6 +333,34 @@ export interface DecomposeDecision {
   signals: Record<string, boolean>;
 }
 
+// ─── Kanban Tasks ─────────────────────────────────────────
+
+export type TaskStatus = 'backlog' | 'in_progress' | 'review' | 'done';
+export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
+
+export interface KanbanTask {
+  id: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  position: number;
+  labels: string[];
+  sessionId?: string;
+  teamId?: string;
+  createdBy: 'user' | 'agent';
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+}
+
+export const KANBAN_COLUMNS: { id: TaskStatus; label: string }[] = [
+  { id: 'backlog', label: 'Backlog' },
+  { id: 'in_progress', label: 'In Progress' },
+  { id: 'review', label: 'Review' },
+  { id: 'done', label: 'Done' },
+];
+
 // ─── Browser ──────────────────────────────────────────────────
 
 export interface BrowserAction {

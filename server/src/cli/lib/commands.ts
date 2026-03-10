@@ -6,9 +6,10 @@
  * All /slash command handlers for the chat REPL.
  */
 
-import type { ModelTier, RoutingProfile } from '@neo-agent/shared';
+import type { KANBAN_COLUMNS, ModelTier, RoutingProfile } from '@neo-agent/shared';
 import { getCommandsForChannel } from '../../channels/command-registry.js';
 import { getQuote } from '../../data/matrix-quotes.js';
+import type { TaskRepo } from '../../db/task-repo.js';
 import type { LongTermMemory, MemorySearch } from '../../memory/index.js';
 import { getRecentLogs, type LogEntry } from '../../utils/logger.js';
 import {
@@ -36,6 +37,7 @@ export interface CommandDeps {
   setModelOverride: (m: ModelTier | null) => void;
   exportTranscript: () => Promise<void>;
   transcript?: unknown; // available for future use
+  taskRepo?: TaskRepo;
 }
 
 // ─── Handler ──────────────────────────────────────────────────
@@ -352,6 +354,78 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
       console.log();
     }
     rl.setPrompt(buildPrompt(sessionMgr.current.id));
+    rl.prompt();
+    return true;
+  }
+
+  // ─── /tasks ─────────────────────────────────────────────
+  if (input === '/tasks') {
+    if (!deps.taskRepo) {
+      console.log();
+      console.log(statusIcon.warn('Task board not available (no task repo)'));
+      console.log();
+      rl.prompt();
+      return true;
+    }
+    const tasks = deps.taskRepo.list();
+    console.log();
+    if (tasks.length === 0) {
+      console.log(statusIcon.info('No tasks yet. Create one with /task <title>'));
+    } else {
+      const statusOrder = ['backlog', 'in_progress', 'review', 'done'] as const;
+      const statusLabels: Record<string, string> = {
+        backlog: 'Backlog',
+        in_progress: 'In Progress',
+        review: 'Review',
+        done: 'Done',
+      };
+      for (const s of statusOrder) {
+        const col = tasks.filter((t) => t.status === s);
+        if (col.length === 0) continue;
+        console.log(`  ${color.neonCyan(statusLabels[s])} ${color.dim(`(${col.length})`)}`);
+        for (const t of col) {
+          const pri =
+            t.priority === 'critical'
+              ? color.red('!')
+              : t.priority === 'high'
+                ? color.yellow('↑')
+                : t.priority === 'low'
+                  ? color.dim('↓')
+                  : color.dim('·');
+          console.log(`    ${pri} ${color.green(t.title)} ${color.dim(t.id.slice(0, 8))}`);
+        }
+      }
+    }
+    console.log();
+    rl.prompt();
+    return true;
+  }
+
+  // ─── /task <title> ─────────────────────────────────────
+  if (input.startsWith('/task ')) {
+    const title = input.slice(6).trim();
+    if (!title) {
+      console.log();
+      console.log(statusIcon.info('Usage: /task <title>'));
+      console.log();
+      rl.prompt();
+      return true;
+    }
+    if (!deps.taskRepo) {
+      console.log();
+      console.log(statusIcon.warn('Task board not available (no task repo)'));
+      console.log();
+      rl.prompt();
+      return true;
+    }
+    const task = deps.taskRepo.create({ title, createdBy: 'user' });
+    console.log();
+    console.log(
+      statusIcon.ok(
+        `Task created: ${color.neonCyan(task.title)} ${color.dim(`[${task.id.slice(0, 8)}]`)}`,
+      ),
+    );
+    console.log();
     rl.prompt();
     return true;
   }

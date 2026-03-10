@@ -57,6 +57,7 @@ export class Architect implements HarnessWrapper {
         binaryChars++;
       }
     }
+    if (content.length === 0) return 0;
     return binaryChars / content.length;
   }
 }

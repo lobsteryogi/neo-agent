@@ -74,7 +74,7 @@ export class SessionManager {
         `INSERT OR IGNORE INTO sessions (id, channel, user_id, model, status, started_at, total_tokens)
        VALUES (?, 'cli', ?, 'sonnet', 'active', ?, 0)`,
       )
-      .run(id, process.env.NEO_USER_NAME ?? 'user', session.startedAt);
+      .run(id, process.env.NEO_USER_NAME ?? 'Human', session.startedAt);
 
     this.current = session;
     return session;
@@ -134,7 +134,7 @@ export class SessionManager {
           `INSERT OR IGNORE INTO sessions (id, channel, user_id, model, status, started_at, total_tokens)
          VALUES (?, 'cli', ?, 'sonnet', 'active', ?, 0)`,
         )
-        .run(id, process.env.NEO_USER_NAME ?? 'user', s.startedAt);
+        .run(id, process.env.NEO_USER_NAME ?? 'Human', s.startedAt);
     }
   }
 }

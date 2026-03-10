@@ -133,6 +133,12 @@ async function main(): Promise<void> {
 
   console.log(status.ok(`Agent registry loaded (${agentRegistry.size} blueprints)`));
 
+  // Phase 8 — Kanban Task Board
+  const { registerTaskRoutes } = await import('./api/task-routes.js');
+  // Broadcast wired after WebChannel starts (below)
+  const taskRoutesBinder = (broadcast: (event: { type: string; [key: string]: unknown }) => void) =>
+    registerTaskRoutes(app, db, broadcast);
+
   console.log(status.ok('Express routes loaded'));
 
   // Phase 5 — Phone Lines: Channel adapters
@@ -142,6 +148,7 @@ async function main(): Promise<void> {
   const { WebChannel } = await import('./channels/web.js');
   const webChannel = new WebChannel({ port: WS_PORT, token: WS_TOKEN });
   await webChannel.start();
+  taskRoutesBinder(webChannel.broadcast.bind(webChannel));
   console.log(status.ok(`WebSocket channel listening on port ${color.matrix(String(WS_PORT))}`));
 
   if (process.env.TELEGRAM_BOT_TOKEN) {
