@@ -224,6 +224,7 @@ async function main(): Promise<void> {
           (tgChannel as any).sendResponse(ctx, response, startMs);
         }
       },
+      taskRepo: new (await import('./db/task-repo.js')).TaskRepo(db),
     });
     tgChannel.onMessage(async (message) => {
       return agent.handleMessage(message);

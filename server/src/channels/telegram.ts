@@ -19,6 +19,7 @@ import { mkdtemp, writeFile } from 'fs/promises';
 import { Bot } from 'grammy';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import type { TaskRepo } from '../db/task-repo.js';
 import type { LongTermMemory, MemorySearch, SessionTranscript } from '../memory/index.js';
 import { getRecentLogs } from '../utils/logger.js';
 import {
@@ -48,6 +49,7 @@ export interface TelegramCommandDeps {
       replyWithChatAction: (action: 'typing') => Promise<unknown>;
     },
   ) => Promise<void>;
+  taskRepo?: TaskRepo;
 }
 
 export class TelegramChannel implements ChannelAdapter {
@@ -615,6 +617,58 @@ export class TelegramChannel implements ChannelAdapter {
             await ctx.reply(markdown.slice(0, 3990) + '\n…(truncated)');
           }
         }
+        return true;
+      }
+
+      case '/tasks': {
+        if (!this.deps?.taskRepo) {
+          await ctx.reply('⚠️ Task board not available.');
+          return true;
+        }
+        const tasks = this.deps.taskRepo.list();
+        if (tasks.length === 0) {
+          await ctx.reply('No tasks yet. Create one with /task <title>');
+          return true;
+        }
+        const statusLabels: Record<string, string> = {
+          backlog: '📋 Backlog',
+          in_progress: '🔨 In Progress',
+          review: '🔍 Review',
+          done: '✅ Done',
+        };
+        const statusOrder = ['backlog', 'in_progress', 'review', 'done'] as const;
+        const lines: string[] = [];
+        for (const s of statusOrder) {
+          const col = tasks.filter((t) => t.status === s);
+          if (col.length === 0) continue;
+          lines.push(`${statusLabels[s]} (${col.length})`);
+          for (const t of col) {
+            const pri =
+              t.priority === 'critical'
+                ? '❗'
+                : t.priority === 'high'
+                  ? '⬆️'
+                  : t.priority === 'low'
+                    ? '⬇️'
+                    : '·';
+            lines.push(`  ${pri} ${t.title} [${t.id.slice(0, 8)}]`);
+          }
+        }
+        await ctx.reply(lines.join('\n'));
+        return true;
+      }
+
+      case '/task': {
+        if (!this.deps?.taskRepo) {
+          await ctx.reply('⚠️ Task board not available.');
+          return true;
+        }
+        if (!arg) {
+          await ctx.reply('Usage: /task <title>');
+          return true;
+        }
+        const task = this.deps.taskRepo.create({ title: arg, createdBy: 'user' });
+        await ctx.reply(`✅ Task created: ${task.title} [${task.id.slice(0, 8)}]`);
         return true;
       }
 
