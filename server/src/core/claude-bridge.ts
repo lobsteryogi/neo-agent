@@ -66,6 +66,9 @@ export class ClaudeBridge extends EventEmitter {
       const messages: SDKStreamMessage[] = [];
       let turnCount = 0;
       let toolCallCount = 0;
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let totalCostUsd = 0;
 
       // Create an abort promise that rejects when the controller fires
       const abortPromise = new Promise<never>((_, reject) => {
@@ -140,11 +143,13 @@ export class ClaudeBridge extends EventEmitter {
             const usageSummary: Record<string, unknown> = {};
             if (usage) {
               for (const [model, u] of Object.entries(usage) as [string, any][]) {
-                usageSummary[model] = {
-                  input: u.inputTokens ?? u.input_tokens ?? 0,
-                  output: u.outputTokens ?? u.output_tokens ?? 0,
-                  cost: u.costUSD ?? 0,
-                };
+                const input = u.inputTokens ?? u.input_tokens ?? 0;
+                const output = u.outputTokens ?? u.output_tokens ?? 0;
+                const cost = u.costUSD ?? 0;
+                totalInputTokens += input;
+                totalOutputTokens += output;
+                totalCostUsd += cost;
+                usageSummary[model] = { input, output, cost };
               }
             }
             log.debug('Result received', {
@@ -178,6 +183,9 @@ export class ClaudeBridge extends EventEmitter {
           content: resultContent,
           messages,
           model: opts.model,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          costUsd: totalCostUsd,
         },
       };
     } catch (err: unknown) {

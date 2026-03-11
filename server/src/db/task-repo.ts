@@ -9,7 +9,7 @@
 import type { KanbanTask, TaskPriority, TaskStatus } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import * as crypto from 'crypto';
-import { getErrorMessage } from '../utils/errors.js';
+import { getErrorMessage, safeJsonParse } from '../utils/errors.js';
 
 interface TaskRow {
   id: string;
@@ -35,7 +35,7 @@ function rowToTask(row: TaskRow): KanbanTask {
     status: row.status as TaskStatus,
     priority: row.priority as TaskPriority,
     position: row.position,
-    labels: JSON.parse(row.labels),
+    labels: safeJsonParse(row.labels, []),
     sessionId: row.session_id ?? undefined,
     teamId: row.team_id ?? undefined,
     createdBy: row.created_by as 'user' | 'agent',

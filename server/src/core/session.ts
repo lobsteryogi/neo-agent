@@ -49,6 +49,10 @@ export class SessionManager {
       status: 'active',
       startedAt: now,
       totalTokens: 0,
+      turns: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCost: 0,
     };
   }
 
@@ -64,6 +68,50 @@ export class SessionManager {
       .run(tokens, sessionId);
   }
 
+  updateExtendedState(
+    sessionId: string,
+    update: {
+      sdkSessionId?: string;
+      lastModelTier?: ModelTier;
+      turns?: number;
+      totalInputTokens?: number;
+      totalOutputTokens?: number;
+      totalCost?: number;
+    },
+  ): void {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+
+    if (update.sdkSessionId !== undefined) {
+      sets.push('sdk_session_id = ?');
+      values.push(update.sdkSessionId);
+    }
+    if (update.lastModelTier !== undefined) {
+      sets.push('last_model_tier = ?');
+      values.push(update.lastModelTier);
+    }
+    if (update.turns !== undefined) {
+      sets.push('turns = ?');
+      values.push(update.turns);
+    }
+    if (update.totalInputTokens !== undefined) {
+      sets.push('total_input_tokens = ?');
+      values.push(update.totalInputTokens);
+    }
+    if (update.totalOutputTokens !== undefined) {
+      sets.push('total_output_tokens = ?');
+      values.push(update.totalOutputTokens);
+    }
+    if (update.totalCost !== undefined) {
+      sets.push('total_cost = ?');
+      values.push(update.totalCost);
+    }
+
+    if (sets.length === 0) return;
+    values.push(sessionId);
+    this.db.prepare(`UPDATE sessions SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+  }
+
   private rowToSession(row: any): Session {
     return {
       id: row.id,
@@ -74,6 +122,12 @@ export class SessionManager {
       startedAt: row.started_at,
       endedAt: row.ended_at ?? undefined,
       totalTokens: row.total_tokens,
+      sdkSessionId: row.sdk_session_id ?? undefined,
+      lastModelTier: row.last_model_tier ?? undefined,
+      turns: row.turns ?? 0,
+      totalInputTokens: row.total_input_tokens ?? 0,
+      totalOutputTokens: row.total_output_tokens ?? 0,
+      totalCost: row.total_cost ?? 0,
     };
   }
 }

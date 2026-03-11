@@ -9,6 +9,7 @@
 
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
+import { safeJsonParse } from '../utils/errors.js';
 
 export interface DailyLogEntry {
   id: string;
@@ -117,9 +118,9 @@ export class DailyLog {
       id: row.id,
       date: row.date,
       summary: row.summary,
-      decisions: JSON.parse(row.decisions || '[]'),
-      blockers: JSON.parse(row.blockers || '[]'),
-      learnings: JSON.parse(row.learnings || '[]'),
+      decisions: safeJsonParse(row.decisions || '[]', []),
+      blockers: safeJsonParse(row.blockers || '[]', []),
+      learnings: safeJsonParse(row.learnings || '[]', []),
       created_at: row.created_at,
     };
   }

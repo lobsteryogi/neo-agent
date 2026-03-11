@@ -20,7 +20,12 @@ export class TailscaleManager {
         timeout: 5_000,
         stdio: 'pipe',
       });
-      const status = JSON.parse(raw);
+      let status: any;
+      try {
+        status = JSON.parse(raw);
+      } catch {
+        return { available: false, degraded: 'Tailscale returned invalid JSON' };
+      }
       const online = status?.Self?.Online ?? false;
 
       return online ? { available: true } : { available: false, degraded: 'Tailscale offline' };

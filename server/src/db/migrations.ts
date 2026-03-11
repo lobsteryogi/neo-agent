@@ -180,6 +180,13 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    version: 5,
+    name: 'session_name',
+    up: `
+      ALTER TABLE chat_sessions ADD COLUMN name TEXT;
+    `,
+  },
+  {
     version: 4,
     name: 'kanban_tasks',
     up: `
@@ -204,6 +211,18 @@ const MIGRATIONS: Migration[] = [
         FOREIGN KEY (team_id) REFERENCES agent_teams(id) ON DELETE SET NULL
       );
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, position);
+    `,
+  },
+  {
+    version: 6,
+    name: 'extended_session_state',
+    up: `
+      ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT;
+      ALTER TABLE sessions ADD COLUMN last_model_tier TEXT;
+      ALTER TABLE sessions ADD COLUMN turns INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN total_input_tokens INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN total_output_tokens INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN total_cost REAL NOT NULL DEFAULT 0;
     `,
   },
 ];

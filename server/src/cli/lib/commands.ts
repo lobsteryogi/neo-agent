@@ -12,6 +12,7 @@ import { getQuote } from '../../data/matrix-quotes.js';
 import type { TaskRepo } from '../../db/task-repo.js';
 import type { LongTermMemory, MemorySearch } from '../../memory/index.js';
 import { getRecentLogs, type LogEntry } from '../../utils/logger.js';
+import { VALID_MODEL_TIERS, VALID_ROUTING_PROFILES } from '../../utils/patterns.js';
 import {
   color,
   digitalRain,
@@ -116,7 +117,7 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
       console.log(color.dim('    Profiles: auto, eco, balanced, premium'));
       console.log(color.dim('    Usage: /route <profile>'));
       console.log();
-    } else if (['auto', 'eco', 'balanced', 'premium'].includes(newProfile)) {
+    } else if ((VALID_ROUTING_PROFILES as readonly string[]).includes(newProfile)) {
       deps.setRoutingProfile(newProfile as RoutingProfile);
       console.log();
       console.log(statusIcon.ok(`Routing → ${color.bold(newProfile)}`));
@@ -307,7 +308,7 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
       rl.prompt();
       return true;
     }
-    if (!['haiku', 'sonnet', 'opus'].includes(tier)) {
+    if (!(VALID_MODEL_TIERS as readonly string[]).includes(tier)) {
       console.log();
       console.log(statusIcon.warn(`Unknown tier "${tier}". Use: haiku, sonnet, opus`));
       console.log();

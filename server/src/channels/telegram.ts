@@ -7,13 +7,25 @@
  * and structured message dispatch. Inspired by OpenClaw's architecture.
  */
 
-import type { AgentResponse, Attachment, InboundMessage, RoutingProfile } from '@neo-agent/shared';
+import type {
+  AgentResponse,
+  Attachment,
+  InboundMessage,
+  ModelTier,
+  RoutingProfile,
+} from '@neo-agent/shared';
 import * as crypto from 'crypto';
 import { mkdtemp, writeFile } from 'fs/promises';
 import { Bot } from 'grammy';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import type { LongTermMemory, MemorySearch } from '../memory/index.js';
+import type { LongTermMemory, MemorySearch, SessionTranscript } from '../memory/index.js';
+import { getRecentLogs } from '../utils/logger.js';
+import {
+  VALID_MODEL_TIERS,
+  VALID_ROUTING_PROFILES,
+  buildTranscriptMarkdown,
+} from '../utils/patterns.js';
 import { formatCommandsText, getCommandsForChannel } from './command-registry.js';
 import type { ChannelAdapter } from './interface.js';
 
@@ -26,6 +38,16 @@ export interface TelegramCommandDeps {
   memorySearch: MemorySearch;
   routingProfile: RoutingProfile;
   setRoutingProfile: (p: RoutingProfile) => void;
+  transcript?: SessionTranscript;
+  setModelOverride?: (sessionKey: string, model: ModelTier) => void;
+  getLastInput?: (sessionKey: string) => string | undefined;
+  retryLastInput?: (
+    sessionKey: string,
+    ctx: {
+      reply: (text: string, opts?: any) => Promise<unknown>;
+      replyWithChatAction: (action: 'typing') => Promise<unknown>;
+    },
+  ) => Promise<void>;
 }
 
 export class TelegramChannel implements ChannelAdapter {
@@ -40,6 +62,25 @@ export class TelegramChannel implements ChannelAdapter {
   ) {
     this.bot = new Bot(token);
     this.deps = deps;
+  }
+
+  /**
+   * Run handler while keeping the typing indicator alive every 4s.
+   * Telegram's typing action expires after ~5s, so we refresh it.
+   */
+  private async runWithTyping(
+    ctx: { replyWithChatAction: (action: 'typing') => Promise<unknown> },
+    fn: () => Promise<AgentResponse | void>,
+  ): Promise<AgentResponse | void> {
+    await ctx.replyWithChatAction('typing');
+    const interval = setInterval(() => {
+      ctx.replyWithChatAction('typing').catch(() => {});
+    }, 4000);
+    try {
+      return await fn();
+    } finally {
+      clearInterval(interval);
+    }
   }
 
   async start(): Promise<void> {
@@ -64,17 +105,9 @@ export class TelegramChannel implements ChannelAdapter {
         if (handled) return;
       }
 
-      await ctx.replyWithChatAction('typing');
       const startMs = Date.now();
-      const response = await this.handler(this.toInbound(ctx));
-      if (response) {
-        const reply = this.formatReplyWithStats(response, Date.now() - startMs);
-        const html = TelegramChannel.mdToHtml(reply);
-        await ctx.reply(html, { parse_mode: 'HTML' }).catch((err) => {
-          console.warn('[Telegram] HTML parse failed, fallback to plain:', err.message);
-          return ctx.reply(reply);
-        });
-      }
+      const response = await this.runWithTyping(ctx, () => this.handler(this.toInbound(ctx)));
+      this.sendResponse(ctx, response, startMs);
     });
 
     // Voice messages
@@ -88,14 +121,11 @@ export class TelegramChannel implements ChannelAdapter {
         fileSize: voice.file_size ?? 0,
         duration: voice.duration,
       });
-      await ctx.replyWithChatAction('typing');
       const startMs = Date.now();
-      const response = await this.handler(this.toInbound(ctx, [attachment]));
-      if (response) {
-        const reply = this.formatReplyWithStats(response, Date.now() - startMs);
-        const html = TelegramChannel.mdToHtml(reply);
-        await ctx.reply(html, { parse_mode: 'HTML' }).catch(() => ctx.reply(reply));
-      }
+      const response = await this.runWithTyping(ctx, () =>
+        this.handler(this.toInbound(ctx, [attachment])),
+      );
+      this.sendResponse(ctx, response, startMs);
     });
 
     // Audio messages
@@ -110,14 +140,11 @@ export class TelegramChannel implements ChannelAdapter {
         duration: audio.duration,
         fileName: audio.file_name,
       });
-      await ctx.replyWithChatAction('typing');
       const startMs = Date.now();
-      const response = await this.handler(this.toInbound(ctx, [attachment]));
-      if (response) {
-        const reply = this.formatReplyWithStats(response, Date.now() - startMs);
-        const html = TelegramChannel.mdToHtml(reply);
-        await ctx.reply(html, { parse_mode: 'HTML' }).catch(() => ctx.reply(reply));
-      }
+      const response = await this.runWithTyping(ctx, () =>
+        this.handler(this.toInbound(ctx, [attachment])),
+      );
+      this.sendResponse(ctx, response, startMs);
     });
 
     // Photos — Telegram sends multiple sizes, use the largest
@@ -134,14 +161,11 @@ export class TelegramChannel implements ChannelAdapter {
         width: largest.width,
         height: largest.height,
       });
-      await ctx.replyWithChatAction('typing');
       const startMs = Date.now();
-      const response = await this.handler(this.toInbound(ctx, [attachment]));
-      if (response) {
-        const reply = this.formatReplyWithStats(response, Date.now() - startMs);
-        const html = TelegramChannel.mdToHtml(reply);
-        await ctx.reply(html, { parse_mode: 'HTML' }).catch(() => ctx.reply(reply));
-      }
+      const response = await this.runWithTyping(ctx, () =>
+        this.handler(this.toInbound(ctx, [attachment])),
+      );
+      this.sendResponse(ctx, response, startMs);
     });
 
     // Documents
@@ -155,14 +179,11 @@ export class TelegramChannel implements ChannelAdapter {
         fileSize: doc.file_size ?? 0,
         fileName: doc.file_name,
       });
-      await ctx.replyWithChatAction('typing');
       const startMs = Date.now();
-      const response = await this.handler(this.toInbound(ctx, [attachment]));
-      if (response) {
-        const reply = this.formatReplyWithStats(response, Date.now() - startMs);
-        const html = TelegramChannel.mdToHtml(reply);
-        await ctx.reply(html, { parse_mode: 'HTML' }).catch(() => ctx.reply(reply));
-      }
+      const response = await this.runWithTyping(ctx, () =>
+        this.handler(this.toInbound(ctx, [attachment])),
+      );
+      this.sendResponse(ctx, response, startMs);
     });
 
     // Video
@@ -178,14 +199,11 @@ export class TelegramChannel implements ChannelAdapter {
         width: video.width,
         height: video.height,
       });
-      await ctx.replyWithChatAction('typing');
       const startMs = Date.now();
-      const response = await this.handler(this.toInbound(ctx, [attachment]));
-      if (response) {
-        const reply = this.formatReplyWithStats(response, Date.now() - startMs);
-        const html = TelegramChannel.mdToHtml(reply);
-        await ctx.reply(html, { parse_mode: 'HTML' }).catch(() => ctx.reply(reply));
-      }
+      const response = await this.runWithTyping(ctx, () =>
+        this.handler(this.toInbound(ctx, [attachment])),
+      );
+      this.sendResponse(ctx, response, startMs);
     });
 
     // Error handling
@@ -209,6 +227,22 @@ export class TelegramChannel implements ChannelAdapter {
 
   onMessage(handler: (message: InboundMessage) => Promise<AgentResponse | void>): void {
     this.handler = handler;
+  }
+
+  // ─── Response Delivery ──────────────────────────────────
+
+  private async sendResponse(
+    ctx: { reply: (text: string, opts?: any) => Promise<unknown> },
+    response: AgentResponse | void,
+    startMs: number,
+  ): Promise<void> {
+    if (!response) return;
+    const reply = this.formatReplyWithStats(response, Date.now() - startMs);
+    const html = TelegramChannel.mdToHtml(reply);
+    await ctx.reply(html, { parse_mode: 'HTML' }).catch((err) => {
+      console.warn('[Telegram] HTML parse failed, fallback to plain:', err.message);
+      return ctx.reply(reply);
+    });
   }
 
   // ─── Markdown → Telegram HTML ─────────────────────────
@@ -298,27 +332,37 @@ export class TelegramChannel implements ChannelAdapter {
   // ─── Stats Formatting ─────────────────────────────────
 
   private formatReplyWithStats(response: AgentResponse, durationMs: number): string {
-    const content = response.content || 'No response.';
+    let content = response.content || 'No response.';
+    // Append any pipeline warnings
+    if (response.warnings?.length) {
+      content += '\n\n⚠️ ' + response.warnings.join('\n⚠️ ');
+    }
     const dur = (durationMs / 1000).toFixed(1);
     const model = response.model ?? '';
 
     // Estimate tokens: use exact count if available, otherwise ~4 chars/token
     const estimatedTokens = response.tokensUsed || Math.ceil(content.length / 4);
-    const tokens = `↓${fmtTokens(estimatedTokens)}`;
+    const estimatedInput = response.inputTokens ?? 0;
+    const cost = response.costUsd ?? 0;
 
     // Update session stats
     if (this.deps) {
       const s = this.deps.sessionMgr.current;
       s.turns += 1;
       s.totalOutputTokens += estimatedTokens;
+      s.totalInputTokens += estimatedInput;
+      s.totalCost += cost;
       this.deps.sessionMgr.save(s);
     }
 
+    const sessionId = this.deps ? `[${this.deps.sessionMgr.current.id}]` : '';
+    const tokens = `↓${fmtTokens(estimatedTokens)}`;
+    const costStr = fmtCost(cost);
     const sessionTotal = this.deps
       ? `Σ${fmtTokens(this.deps.sessionMgr.current.totalInputTokens + this.deps.sessionMgr.current.totalOutputTokens)}`
       : '';
 
-    const parts = [tokens, `${dur}s`, sessionTotal, model].filter(Boolean);
+    const parts = [sessionId, tokens, costStr, `${dur}s`, sessionTotal, model].filter(Boolean);
     const statsLine = `\n\n┗━ ${parts.join(' · ')}`;
     return content + statsLine;
   }
@@ -386,7 +430,7 @@ export class TelegramChannel implements ChannelAdapter {
           await ctx.reply(
             `Current: ${this.deps.routingProfile}\nProfiles: auto, eco, balanced, premium\nUsage: /route <profile>`,
           );
-        } else if (['auto', 'eco', 'balanced', 'premium'].includes(arg)) {
+        } else if ((VALID_ROUTING_PROFILES as readonly string[]).includes(arg)) {
           this.deps.setRoutingProfile(arg as RoutingProfile);
           await ctx.reply(`✅ Routing → ${arg}`);
         } else {
@@ -480,6 +524,96 @@ export class TelegramChannel implements ChannelAdapter {
         } else {
           this.deps.sessionMgr.create(arg);
           await ctx.reply(`✅ Created → ${arg}`);
+        }
+        return true;
+      }
+
+      case '/retry': {
+        if (!this.deps?.retryLastInput) {
+          await ctx.reply('⚠️ Retry not available.');
+          return true;
+        }
+        const chatId = (ctx as any).message?.chat?.id;
+        const sessionKey = chatId ? `telegram:${chatId}` : '';
+        const lastInput = this.deps.getLastInput?.(sessionKey);
+        if (!lastInput) {
+          await ctx.reply('Nothing to retry yet.');
+          return true;
+        }
+        await ctx.reply(`↺ Retrying: "${lastInput.slice(0, 60)}"`);
+        await this.deps.retryLastInput(sessionKey, ctx as any);
+        return true;
+      }
+
+      case '/model': {
+        if (!this.deps?.setModelOverride) {
+          await ctx.reply('⚠️ Model override not available.');
+          return true;
+        }
+        if (!arg) {
+          await ctx.reply(
+            'Usage: /model <haiku|sonnet|opus>\nForces the next message to use that model, then reverts.',
+          );
+          return true;
+        }
+        if (!(VALID_MODEL_TIERS as readonly string[]).includes(arg)) {
+          await ctx.reply(`⚠️ Unknown tier "${arg}". Use: ${VALID_MODEL_TIERS.join(', ')}`);
+          return true;
+        }
+        const chatId2 = (ctx as any).message?.chat?.id;
+        const sessionKey2 = chatId2 ? `telegram:${chatId2}` : '';
+        this.deps.setModelOverride(sessionKey2, arg as ModelTier);
+        await ctx.reply(`✅ Next message → ${arg} (one-shot)`);
+        return true;
+      }
+
+      case '/debug': {
+        const entries = getRecentLogs(50, arg || undefined);
+        if (entries.length === 0) {
+          await ctx.reply(arg ? `No logs for [${arg}]` : 'No logs captured yet.');
+          return true;
+        }
+        const lines = entries.map((e) => {
+          const data = e.data && Object.keys(e.data).length > 0 ? ` ${JSON.stringify(e.data)}` : '';
+          return `[${e.timestamp.slice(11, 23)}] ${e.level.toUpperCase()} [${e.namespace}] ${e.message}${data}`;
+        });
+        // Telegram message limit is 4096 chars
+        let text = `📋 Debug Logs${arg ? ` [${arg}]` : ''}:\n\n${lines.join('\n')}`;
+        if (text.length > 4000) {
+          text = text.slice(0, 3990) + '\n…(truncated)';
+        }
+        await ctx.reply(text);
+        return true;
+      }
+
+      case '/export': {
+        if (!this.deps?.transcript) {
+          await ctx.reply('⚠️ Export not available.');
+          return true;
+        }
+        const s = this.deps.sessionMgr.current;
+        const history = this.deps.transcript.getHistory(s.id, 1000);
+        if (history.length === 0) {
+          await ctx.reply('No transcript to export.');
+          return true;
+        }
+        const markdown = buildTranscriptMarkdown(s, history as any[], fmtTokens, fmtCost);
+        const exportDate = new Date().toISOString().slice(0, 10);
+        // Send as text if short enough, otherwise as document
+        if (markdown.length <= 4000) {
+          await ctx.reply(markdown);
+        } else {
+          // Send as file
+          const { Buffer } = await import('buffer');
+          const buf = Buffer.from(markdown, 'utf-8');
+          const filename = `neo-export-${s.id}-${exportDate}.md`;
+          const tgCtx = ctx as any;
+          if (tgCtx.replyWithDocument) {
+            await tgCtx.replyWithDocument({ source: buf, filename });
+          } else {
+            // Fallback: send truncated text
+            await ctx.reply(markdown.slice(0, 3990) + '\n…(truncated)');
+          }
         }
         return true;
       }

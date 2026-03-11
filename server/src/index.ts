@@ -203,6 +203,27 @@ async function main(): Promise<void> {
       setRoutingProfile: (p) => {
         tgRoutingProfile = p;
       },
+      transcript: agent.getTranscript(),
+      setModelOverride: (sessionKey, model) => agent.setModelOverride(sessionKey, model),
+      getLastInput: (sessionKey) => agent.getLastInput(sessionKey),
+      retryLastInput: async (sessionKey, ctx) => {
+        const lastInput = agent.getLastInput(sessionKey);
+        if (!lastInput) return;
+        const chatId = sessionKey.replace('telegram:', '');
+        const response = await agent.handleMessage({
+          id: `retry-${Date.now()}`,
+          channelId: chatId,
+          channel: 'telegram',
+          userId: '',
+          content: lastInput,
+          timestamp: Date.now(),
+          sessionKey,
+        });
+        if (response) {
+          const startMs = Date.now();
+          (tgChannel as any).sendResponse(ctx, response, startMs);
+        }
+      },
     });
     tgChannel.onMessage(async (message) => {
       return agent.handleMessage(message);

@@ -24,6 +24,14 @@ import {
 import { TaskClassifier } from '../router/classifier.js';
 import { RouterEngine } from '../router/engine.js';
 import { enableLogRelay, getRecentLogs, logger } from '../utils/logger.js';
+import {
+  buildTranscriptMarkdown,
+  calculateTimeoutMs,
+  formatDebugLogs,
+  injectCompactedContext,
+  injectDebugContext,
+  isDebugIntent,
+} from '../utils/patterns.js';
 import { color, getSpinnerFrame } from '../utils/terminal.js';
 import { TaskRepo } from '../db/task-repo.js';
 import { handleCommand } from './lib/commands.js';
@@ -231,19 +239,17 @@ async function processInput(input: string): Promise<void> {
     attachStreamHandler(bridge, ctx, spinner, AGENT_NAME);
 
     // Dynamic timeout
-    const timeoutMs =
-      classification.complexity >= 0.7
-        ? 600_000
-        : classification.complexity >= 0.4
-          ? 300_000
-          : 120_000;
+    const timeoutMs = calculateTimeoutMs(classification.complexity);
 
     const permMode = process.env.NEO_PERMISSION_MODE || 'default';
 
     // Inject compacted context from /compact into system prompt
     let effectiveSystemPrompt = systemPrompt;
     if (compaction.compactedContext) {
-      effectiveSystemPrompt += `\n\n## Compacted Context (from previous conversation)\n\nThe conversation was compacted. Below is a summary of the key context from the previous turns. Use this to maintain continuity.\n\n${compaction.compactedContext}`;
+      effectiveSystemPrompt = injectCompactedContext(
+        effectiveSystemPrompt,
+        compaction.compactedContext,
+      );
       log.debug('Compacted context injected', {
         summaryLength: compaction.compactedContext.length,
       });
@@ -271,30 +277,13 @@ async function processInput(input: string): Promise<void> {
     };
 
     // Self-debug intent detection
-    const lower = sanitized.content.toLowerCase();
-    const isDebugIntent =
-      /\b(debug|diagnose|trace|inspect|self-debug)\b/.test(lower) ||
-      /\b(what happened|why did you|what went wrong|how did you|what did you do)\b/.test(lower) ||
-      /\b(too slow|took too long|wrong answer|incorrect|you (were|are) wrong|broke|broken|failing)\b/.test(
-        lower,
-      ) ||
-      /\b(how do you work|your (logs?|pipeline|process|routing|thinking)|show me your|explain your)\b/.test(
-        lower,
-      ) ||
-      /\b(something (is )?wrong|not working|didn'?t work|error|issue|problem|bug)\b/.test(lower);
-
-    if (isDebugIntent) {
+    if (isDebugIntent(sanitized.content)) {
       const recentLogs = getRecentLogs(100);
       if (recentLogs.length > 0) {
-        const logText = recentLogs
-          .map((e) => {
-            const data =
-              e.data && Object.keys(e.data).length > 0 ? ` ${JSON.stringify(e.data)}` : '';
-            const err = e.error ? ` ERROR: ${e.error.message}` : '';
-            return `[${e.timestamp.slice(11, 23)}] ${e.level.toUpperCase()} [${e.namespace}] ${e.message}${data}${err}`;
-          })
-          .join('\n');
-        runOpts.systemPrompt += `\n\n## Self-Debug Context\n\nThe user appears to be asking about your behavior, performance, or a problem they encountered. Below are your recent internal pipeline logs — use them to explain what happened, diagnose issues, or reason about your own processing. Be transparent and helpful.\n\n<debug_logs>\n${logText}\n</debug_logs>`;
+        runOpts.systemPrompt = injectDebugContext(
+          runOpts.systemPrompt,
+          formatDebugLogs(recentLogs),
+        );
         log.debug('Debug context injected', { logCount: recentLogs.length });
       }
     } else {
@@ -452,6 +441,7 @@ async function processInput(input: string): Promise<void> {
         compaction.lastCompactionInfo,
         s.turns,
         compaction.autoCompactTurnThreshold,
+        s.id,
       ),
     );
     console.log();
@@ -478,26 +468,9 @@ async function exportTranscript(): Promise<void> {
   }
   const date = new Date().toISOString().slice(0, 10);
   const filename = `${process.env.HOME ?? '.'}/neo-export-${s.id}-${date}.md`;
-  const lines = [
-    `# Neo Session Export`,
-    ``,
-    `**Session:** \`${s.id}\`  `,
-    `**Date:** ${date}  `,
-    `**Turns:** ${s.turns}  `,
-    `**Tokens:** ${fmtTokens(s.totalInputTokens + s.totalOutputTokens)}  `,
-    `**Cost:** ${fmtCost(s.totalCost)}  `,
-    ``,
-    `---`,
-    ``,
-  ];
-  for (const m of history) {
-    lines.push(`## ${m.role === 'user' ? '👤 You' : '🤖 Neo'}`);
-    lines.push(``);
-    lines.push((m as any).content ?? '');
-    lines.push(``);
-  }
+  const markdown = buildTranscriptMarkdown(s, history as any[], fmtTokens, fmtCost);
   const { writeFileSync } = await import('fs');
-  writeFileSync(filename, lines.join('\n'));
+  writeFileSync(filename, markdown);
   console.log();
   console.log(`  ${color.green('▓')} Exported → ${color.neonCyan(filename)}`);
   console.log();

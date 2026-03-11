@@ -17,6 +17,12 @@ export interface Session {
   startedAt: number;
   endedAt?: number;
   totalTokens: number;
+  sdkSessionId?: string;
+  lastModelTier?: ModelTier;
+  turns?: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  totalCost?: number;
 }
 
 // ─── Messages ──────────────────────────────────────────────────
@@ -192,9 +198,12 @@ export interface AgentResponse {
   content: string;
   model: ModelTier;
   tokensUsed?: number;
+  inputTokens?: number;
+  costUsd?: number;
   neoQuip?: string;
   retryable?: boolean;
   gateBlocked?: GateVerdict;
+  warnings?: string[];
 }
 
 // ─── Memory ────────────────────────────────────────────────────

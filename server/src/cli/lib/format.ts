@@ -15,12 +15,7 @@ export const R = '\x1b[0m';
 
 // ─── Follow-up Detection ──────────────────────────────────────
 
-const SHORT_FOLLOWUP_RE =
-  /^(ok|okay|yes|yep|yeah|yea|sure|go|go ahead|do it|proceed|continue|y|k|👍|please|pls|correct|right|exactly|that|this|alright|aye|roger|bet|cool|fine|sounds good|ship it|lgtm|let's go|go for it|make it so|affirmative)$/i;
-
-export function isShortFollowup(input: string): boolean {
-  return input.length <= 40 && SHORT_FOLLOWUP_RE.test(input.trim());
-}
+export { isShortFollowup } from '../../utils/patterns.js';
 
 // ─── Token / Cost formatting ───────────────────────────────────
 
@@ -38,6 +33,10 @@ export function fmtCost(usd: number): string {
 // All current Claude models share the same 200k context window
 const CONTEXT_LIMIT = 200_000;
 
+function shortSession(id: string): string {
+  return id.length > 6 ? id.slice(0, 6) + '…' : id;
+}
+
 export function statsLine(
   output: number,
   sessionTotal: number,
@@ -48,6 +47,7 @@ export function statsLine(
   compaction?: { summarized: number; kept: number } | null,
   turns?: number,
   compactThreshold?: number,
+  sessionId?: string,
 ): string {
   const dur = (durationMs / 1000).toFixed(1);
   const modelTag = model ? ` ${color.magenta(model)}` : '';
@@ -60,7 +60,10 @@ export function statsLine(
     compactTag = ` ${color.dim(`▓${turns}/${compactThreshold}`)}`;
   }
   const ctxGauge = `${color.green(fmtTokens(sessionTotal))}${color.dim(`/${fmtTokens(CONTEXT_LIMIT)}`)}`;
-  return `  ${color.darkGreen('┗━')} ${color.neonCyan(`↓${fmtTokens(output)}`)} ${color.neonYellow(fmtCost(cost))} ${color.dim(`${dur}s`)}  Σ${ctxGauge}${modelTag}${routeTag}${compactTag}`;
+  const sessionTag = sessionId
+    ? `${color.dim('[')}${color.dimCyan(shortSession(sessionId))}${color.dim(']')} `
+    : '';
+  return `  ${color.darkGreen('┗━')} ${sessionTag}${color.neonCyan(`↓${fmtTokens(output)}`)} ${color.neonYellow(fmtCost(cost))} ${color.dim(`${dur}s`)}  Σ${ctxGauge}${modelTag}${routeTag}${compactTag}`;
 }
 
 export function sessionInfo(s: SessionState): string {
