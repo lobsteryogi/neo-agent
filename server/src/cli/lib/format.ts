@@ -26,15 +26,14 @@ export function fmtTokens(n: number): string {
 }
 
 export function fmtCost(usd: number): string {
-  if (usd < 0.01) return `$${(usd * 100).toFixed(2)}¢`;
-  return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
 }
 
 // All current Claude models share the same 200k context window
 const CONTEXT_LIMIT = 200_000;
 
 function shortSession(id: string): string {
-  return id.length > 6 ? id.slice(0, 6) + '…' : id;
+  return id.length > 4 ? id.slice(0, 4) + '…' : id;
 }
 
 export function statsLine(
@@ -50,7 +49,8 @@ export function statsLine(
   sessionId?: string,
 ): string {
   const dur = (durationMs / 1000).toFixed(1);
-  const modelTag = model ? ` ${color.magenta(model)}` : '';
+  const modelAbbrev: Record<string, string> = { sonnet: 'S', opus: 'O', haiku: 'H' };
+  const modelTag = model ? ` ${color.magenta(modelAbbrev[model] ?? model)}` : '';
   const routeTag =
     routeScore !== undefined ? ` ${color.dimCyan(`r:${routeScore.toFixed(2)}`)}` : '';
   let compactTag = '';
