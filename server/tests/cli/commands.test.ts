@@ -517,41 +517,41 @@ describe('handleCommand', () => {
     });
   });
 
-  // ─── /neo-dev ───────────────────────────────────────────────────
+  // ─── /dev ───────────────────────────────────────────────────
 
-  it('/neo-dev without setNeoDevMode warns not available', () => {
+  it('/dev without setNeoDevMode warns not available', () => {
     deps.setNeoDevMode = undefined;
-    const result = handleCommand('/neo-dev', deps);
+    const result = handleCommand('/dev', deps);
     expect(result).toBe(true);
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('not available'));
   });
 
-  it('/neo-dev on enables dev mode', () => {
+  it('/dev on enables dev mode', () => {
     deps.setNeoDevMode = vi.fn();
-    const result = handleCommand('/neo-dev on', deps);
+    const result = handleCommand('/dev on', deps);
     expect(result).toBe(true);
     expect(deps.setNeoDevMode).toHaveBeenCalledWith(true);
   });
 
-  it('/neo-dev off disables dev mode', () => {
+  it('/dev off disables dev mode', () => {
     deps.setNeoDevMode = vi.fn();
-    const result = handleCommand('/neo-dev off', deps);
+    const result = handleCommand('/dev off', deps);
     expect(result).toBe(true);
     expect(deps.setNeoDevMode).toHaveBeenCalledWith(false);
   });
 
-  it('/neo-dev without argument shows current status (on)', () => {
+  it('/dev without argument shows current status (on)', () => {
     deps.setNeoDevMode = vi.fn();
     deps.neoDevMode = true;
-    const result = handleCommand('/neo-dev', deps);
+    const result = handleCommand('/dev', deps);
     expect(result).toBe(true);
     expect(deps.setNeoDevMode).not.toHaveBeenCalled();
   });
 
-  it('/neo-dev without argument shows current status (off)', () => {
+  it('/dev without argument shows current status (off)', () => {
     deps.setNeoDevMode = vi.fn();
     deps.neoDevMode = false;
-    const result = handleCommand('/neo-dev', deps);
+    const result = handleCommand('/dev', deps);
     expect(result).toBe(true);
     expect(deps.setNeoDevMode).not.toHaveBeenCalled();
   });

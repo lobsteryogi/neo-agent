@@ -221,17 +221,19 @@ async function main(): Promise<void> {
         tgRoutingProfile = p;
       },
       transcript: agent.getTranscript(),
-      setModelOverride: (sessionKey, model) => agent.setModelOverride(sessionKey, model),
-      getLastInput: (sessionKey) => agent.getLastInput(sessionKey),
-      retryLastInput: async (sessionKey, ctx) => {
-        const lastInput = agent.getLastInput(sessionKey);
+      setModelOverride: (key, model) => agent.setModelOverride(key, model),
+      getLastInput: (key) => agent.getLastInput(key),
+      retryLastInput: async (sessionKey, userId, ctx) => {
+        // Construct the same userKey that the agent uses internally
+        const userKey = userId ? `${sessionKey}:${userId}` : sessionKey;
+        const lastInput = agent.getLastInput(userKey);
         if (!lastInput) return;
         const chatId = sessionKey.replace('telegram:', '');
         const response = await agent.handleMessage({
           id: `retry-${Date.now()}`,
           channelId: chatId,
           channel: 'telegram',
-          userId: '',
+          userId,
           content: lastInput,
           timestamp: Date.now(),
           sessionKey,
@@ -242,6 +244,9 @@ async function main(): Promise<void> {
         }
       },
       taskRepo: new (await import('./db/task-repo.js')).TaskRepo(db),
+      setNeoDevMode: (key: string, on: boolean) => agent.setNeoDevMode(key, on),
+      isNeoDevMode: (key: string) => agent.isNeoDevMode(key),
+      observeGroupMessage: (message) => agent.observeGroupMessage(message),
     });
     tgChannel.onMessage(async (message) => {
       return agent.handleMessage(message);

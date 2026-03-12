@@ -40,18 +40,24 @@ export interface TelegramCommandDeps {
   routingProfile: RoutingProfile;
   setRoutingProfile: (p: RoutingProfile) => void;
   transcript?: SessionTranscript;
-  setModelOverride?: (sessionKey: string, model: ModelTier) => void;
-  getLastInput?: (sessionKey: string) => string | undefined;
+  /** Key is a userKey (per-user in groups) or sessionKey (DMs). */
+  setModelOverride?: (key: string, model: ModelTier) => void;
+  /** Key is a userKey (per-user in groups) or sessionKey (DMs). */
+  getLastInput?: (key: string) => string | undefined;
   retryLastInput?: (
     sessionKey: string,
+    userId: string,
     ctx: {
       reply: (text: string, opts?: any) => Promise<unknown>;
       replyWithChatAction: (action: 'typing') => Promise<unknown>;
     },
   ) => Promise<void>;
   taskRepo?: TaskRepo;
-  setNeoDevMode?: (sessionKey: string, on: boolean) => void;
-  isNeoDevMode?: (sessionKey: string) => boolean;
+  /** Key is a userKey. Disabled in group chats for security. */
+  setNeoDevMode?: (key: string, on: boolean) => void;
+  isNeoDevMode?: (key: string) => boolean;
+  /** Record a group message into the transcript without triggering agent. */
+  observeGroupMessage?: (message: InboundMessage) => void;
 }
 
 export class TelegramChannel implements ChannelAdapter {
@@ -102,11 +108,37 @@ export class TelegramChannel implements ChannelAdapter {
     // Text messages
     this.bot.on('message:text', async (ctx) => {
       const text = ctx.message.text;
+      const chatType = ctx.message.chat.type;
+      const isGroup = chatType === 'group' || chatType === 'supergroup';
 
-      // Handle bot commands
+      if (isGroup) {
+        console.log(
+          `[Telegram] Group message received: chatType=${chatType} from=${ctx.message.from?.username ?? ctx.message.from?.id} text="${text.slice(0, 80)}" entities=${JSON.stringify(ctx.message.entities?.map((e) => e.type) ?? [])} botUsername=${ctx.me?.username}`,
+        );
+      }
+
+      // Handle slash commands first (before group guard)
       if (text.startsWith('/')) {
+        if (isGroup) {
+          // In groups, ignore commands addressed to another bot (e.g. /help@other_bot)
+          const botUsername = ctx.me?.username;
+          const cmdMatch = text.match(/^\/\w+@(\w+)/);
+          if (cmdMatch && botUsername && cmdMatch[1].toLowerCase() !== botUsername.toLowerCase())
+            return;
+        }
         const handled = await this.handleCommand(text, ctx);
         if (handled) return;
+        // In groups, don't send unrecognized commands to the agent
+        if (isGroup) return;
+      }
+
+      // For non-command messages in groups, require @mention or reply-to-bot
+      if (this.isGroupMessageNotForUs(ctx)) {
+        // Still observe the message for group context
+        if (isGroup && this.deps?.observeGroupMessage) {
+          this.deps.observeGroupMessage(this.toInbound(ctx));
+        }
+        return;
       }
 
       const startMs = Date.now();
@@ -116,6 +148,12 @@ export class TelegramChannel implements ChannelAdapter {
 
     // Voice messages
     this.bot.on('message:voice', async (ctx) => {
+      if (this.isGroupMessageNotForUs(ctx)) {
+        if (this.isGroupChat(ctx) && this.deps?.observeGroupMessage) {
+          this.deps.observeGroupMessage(this.toInbound(ctx));
+        }
+        return;
+      }
       const voice = ctx.message.voice;
       const attachment = await this.downloadTelegramFile(ctx, {
         fileId: voice.file_id,
@@ -134,6 +172,12 @@ export class TelegramChannel implements ChannelAdapter {
 
     // Audio messages
     this.bot.on('message:audio', async (ctx) => {
+      if (this.isGroupMessageNotForUs(ctx)) {
+        if (this.isGroupChat(ctx) && this.deps?.observeGroupMessage) {
+          this.deps.observeGroupMessage(this.toInbound(ctx));
+        }
+        return;
+      }
       const audio = ctx.message.audio;
       const attachment = await this.downloadTelegramFile(ctx, {
         fileId: audio.file_id,
@@ -153,6 +197,12 @@ export class TelegramChannel implements ChannelAdapter {
 
     // Photos — Telegram sends multiple sizes, use the largest
     this.bot.on('message:photo', async (ctx) => {
+      if (this.isGroupMessageNotForUs(ctx)) {
+        if (this.isGroupChat(ctx) && this.deps?.observeGroupMessage) {
+          this.deps.observeGroupMessage(this.toInbound(ctx));
+        }
+        return;
+      }
       const photos = ctx.message.photo;
       if (!photos || photos.length === 0) return;
       const largest = photos[photos.length - 1];
@@ -174,6 +224,12 @@ export class TelegramChannel implements ChannelAdapter {
 
     // Documents
     this.bot.on('message:document', async (ctx) => {
+      if (this.isGroupMessageNotForUs(ctx)) {
+        if (this.isGroupChat(ctx) && this.deps?.observeGroupMessage) {
+          this.deps.observeGroupMessage(this.toInbound(ctx));
+        }
+        return;
+      }
       const doc = ctx.message.document;
       const attachment = await this.downloadTelegramFile(ctx, {
         fileId: doc.file_id,
@@ -192,6 +248,12 @@ export class TelegramChannel implements ChannelAdapter {
 
     // Video
     this.bot.on('message:video', async (ctx) => {
+      if (this.isGroupMessageNotForUs(ctx)) {
+        if (this.isGroupChat(ctx) && this.deps?.observeGroupMessage) {
+          this.deps.observeGroupMessage(this.toInbound(ctx));
+        }
+        return;
+      }
       const video = ctx.message.video;
       const attachment = await this.downloadTelegramFile(ctx, {
         fileId: video.file_id,
@@ -373,11 +435,36 @@ export class TelegramChannel implements ChannelAdapter {
 
   // ─── Bot Commands ─────────────────────────────────────
 
+  /** Check if a ctx is from a group chat. */
+  private isGroupChat(ctx: any): boolean {
+    const type = ctx.message?.chat?.type;
+    return type === 'group' || type === 'supergroup';
+  }
+
+  /** Extract group context from a Telegram ctx for per-user keying. */
+  private getCtxKeys(ctx: any): {
+    chatId: number;
+    userId: string;
+    isGroup: boolean;
+    sessionKey: string;
+    userKey: string;
+  } {
+    const chatId = ctx.message?.chat?.id ?? 0;
+    const userId = String(ctx.message?.from?.id ?? '');
+    const chatType = ctx.message?.chat?.type;
+    const isGroup = chatType === 'group' || chatType === 'supergroup';
+    const sessionKey = `telegram:${chatId}`;
+    const userKey = isGroup ? `${sessionKey}:${userId}` : sessionKey;
+    return { chatId, userId, isGroup, sessionKey, userKey };
+  }
+
   async handleCommand(
     text: string,
-    ctx: { reply: (text: string) => Promise<unknown> },
+    ctx: { reply: (text: string) => Promise<unknown>; me?: { username: string } },
   ): Promise<boolean> {
-    const [cmd, ...args] = text.split(' ');
+    const [rawCmd, ...args] = text.split(' ');
+    // Strip @botname suffix from commands in group chats (e.g. /dev@neo_bot → /dev)
+    const cmd = rawCmd.replace(/@\w+$/, '');
     const arg = args.join(' ').trim();
 
     switch (cmd) {
@@ -537,15 +624,14 @@ export class TelegramChannel implements ChannelAdapter {
           await ctx.reply('⚠️ Retry not available.');
           return true;
         }
-        const chatId = (ctx as any).message?.chat?.id;
-        const sessionKey = chatId ? `telegram:${chatId}` : '';
-        const lastInput = this.deps.getLastInput?.(sessionKey);
+        const { sessionKey: sk, userId: uid, userKey: uk } = this.getCtxKeys(ctx);
+        const lastInput = this.deps.getLastInput?.(uk);
         if (!lastInput) {
           await ctx.reply('Nothing to retry yet.');
           return true;
         }
         await ctx.reply(`↺ Retrying: "${lastInput.slice(0, 60)}"`);
-        await this.deps.retryLastInput(sessionKey, ctx as any);
+        await this.deps.retryLastInput(sk, uid, ctx as any);
         return true;
       }
 
@@ -564,9 +650,8 @@ export class TelegramChannel implements ChannelAdapter {
           await ctx.reply(`⚠️ Unknown tier "${arg}". Use: ${VALID_MODEL_TIERS.join(', ')}`);
           return true;
         }
-        const chatId2 = (ctx as any).message?.chat?.id;
-        const sessionKey2 = chatId2 ? `telegram:${chatId2}` : '';
-        this.deps.setModelOverride(sessionKey2, arg as ModelTier);
+        const { userKey: uk2 } = this.getCtxKeys(ctx);
+        this.deps.setModelOverride(uk2, arg as ModelTier);
         await ctx.reply(`✅ Next message → ${arg} (one-shot)`);
         return true;
       }
@@ -679,20 +764,41 @@ export class TelegramChannel implements ChannelAdapter {
           await ctx.reply('⚠️ Neo-Dev mode not available.');
           return true;
         }
-        const chatId3 = (ctx as any).message?.chat?.id;
-        const sessionKey3 = chatId3 ? `telegram:${chatId3}` : '';
+        const { isGroup: isGrp, userKey: uk3 } = this.getCtxKeys(ctx);
+        if (isGrp) {
+          await ctx.reply('🔒 Neo-Dev mode is disabled in group chats for security.');
+          return true;
+        }
         if (arg === 'on') {
-          this.deps.setNeoDevMode(sessionKey3, true);
+          this.deps.setNeoDevMode(uk3, true);
           await ctx.reply('🟢 Neo-Dev mode ON — agent can freely edit neo-agent codebase');
         } else if (arg === 'off') {
-          this.deps.setNeoDevMode(sessionKey3, false);
+          this.deps.setNeoDevMode(uk3, false);
           await ctx.reply('⚪ Neo-Dev mode OFF — back to normal permissions');
         } else {
-          const current = this.deps.isNeoDevMode(sessionKey3) ? 'ON' : 'OFF';
+          const current = this.deps.isNeoDevMode(uk3) ? 'ON' : 'OFF';
           await ctx.reply(
             `Neo-Dev mode: ${current}\nUsage: /dev <on|off>\nWhen ON, agent can edit the neo-agent codebase without permission prompts.`,
           );
         }
+        return true;
+      }
+
+      case '/brag': {
+        await ctx.reply(
+          `🕶️ Neo-Agent — Your Personal AI Powerhouse\n\n` +
+            `Here's what I can do:\n\n` +
+            `💬 Chat Naturally — Talk to me like you'd talk to a friend. I get context, follow threads, and keep up.\n\n` +
+            `🧠 Long-Term Memory — I remember your preferences, decisions, and important facts across sessions. You tell me once, I remember.\n\n` +
+            `🔧 Code & Build — I read, write, and edit code. I run commands, search codebases, and debug issues end-to-end.\n\n` +
+            `🌐 Web Research — I search the internet, fetch pages, and pull out what matters.\n\n` +
+            `📎 Media — Send me voice notes, images, documents, or videos. I handle them all.\n\n` +
+            `🤖 Smart Routing — I automatically pick the best AI model for each task — fast for quick answers, powerful for complex work.\n\n` +
+            `⚡ Multi-Channel — CLI or Telegram, same brain, everywhere.\n\n` +
+            `🎯 Skills & Sub-Agents — Specialized skills and sub-agents for complex multi-step workflows.\n\n` +
+            `📋 Task Tracking — Manage tasks right here with /task and /tasks.\n\n` +
+            `Just start chatting. I'll figure out the rest. 🕶️`,
+        );
         return true;
       }
 
@@ -748,25 +854,101 @@ export class TelegramChannel implements ChannelAdapter {
 
   // ─── Message Transform ────────────────────────────────
 
-  toInbound(ctx: { message: unknown }, attachments?: Attachment[]): InboundMessage {
+  /**
+   * In group/supergroup chats, only respond if the bot is mentioned or
+   * a slash command is explicitly addressed to us (e.g. /cmd@ourbot).
+   * Returns true if the message should be ignored (not addressed to us).
+   */
+  private isGroupMessageNotForUs(ctx: {
+    message?: {
+      chat: { type: string };
+      text?: string;
+      caption?: string;
+      entities?: Array<{ type: string; offset: number; length: number }>;
+      reply_to_message?: { from?: { id: number } };
+    };
+    me?: { username: string; id: number };
+  }): boolean {
+    const chatType = ctx.message?.chat?.type;
+    if (chatType !== 'group' && chatType !== 'supergroup') return false;
+
+    const text = ctx.message?.text ?? ctx.message?.caption ?? '';
+    const botUsername = ctx.me?.username;
+    const entities = ctx.message?.entities ?? [];
+
+    // Allow slash commands addressed to this bot (e.g. /status@neo_bot)
+    if (botUsername) {
+      const hasBotCommand = entities.some((e) => e.type === 'bot_command');
+      if (hasBotCommand && text.toLowerCase().includes(`@${botUsername.toLowerCase()}`))
+        return false;
+    }
+
+    // Check for @mention in entities
+    if (botUsername) {
+      const hasMentionEntity = entities.some(
+        (e) =>
+          e.type === 'mention' &&
+          text.slice(e.offset, e.offset + e.length).toLowerCase() ===
+            `@${botUsername.toLowerCase()}`,
+      );
+      if (hasMentionEntity) return false;
+    }
+
+    // Fallback: check text contains @botname
+    if (botUsername && text.toLowerCase().includes(`@${botUsername.toLowerCase()}`)) return false;
+
+    // Allow replies to the bot's own messages
+    if (ctx.me?.id && ctx.message?.reply_to_message?.from?.id === ctx.me.id) return false;
+
+    // Not mentioned — ignore
+    return true;
+  }
+
+  /**
+   * Strip the bot @mention from the message text so the agent sees clean input.
+   */
+  private stripBotMention(text: string, botUsername?: string): string {
+    if (!botUsername) return text;
+    return text.replace(new RegExp(`@${botUsername}\\b`, 'gi'), '').trim();
+  }
+
+  toInbound(
+    ctx: { message: unknown; me?: { username: string } },
+    attachments?: Attachment[],
+  ): InboundMessage {
     const msg = ctx.message as {
       message_id: number;
-      chat: { id: number };
-      from?: { id: number };
+      chat: { id: number; type: string };
+      from?: { id: number; first_name?: string; last_name?: string; username?: string };
       text?: string;
       caption?: string;
       date: number;
     };
+
+    const rawContent = msg.text ?? msg.caption ?? '';
+    const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
+    const content = isGroup
+      ? this.stripBotMention(rawContent, (ctx as any).me?.username)
+      : rawContent;
+
+    // Build sender display name for group context
+    const from = msg.from;
+    const senderName = from
+      ? [from.first_name, from.last_name].filter(Boolean).join(' ') ||
+        from.username ||
+        String(from.id)
+      : undefined;
 
     return {
       id: String(msg.message_id),
       channelId: String(msg.chat.id),
       channel: 'telegram',
       userId: String(msg.from?.id ?? ''),
-      content: msg.text ?? msg.caption ?? '',
+      content,
       timestamp: msg.date * 1000,
       sessionKey: `telegram:${msg.chat.id}`,
       attachments: attachments?.length ? attachments : undefined,
+      metadata: isGroup ? { isGroup: true, senderName } : { senderName: senderName ?? undefined },
     };
   }
 }

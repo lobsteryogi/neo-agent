@@ -39,11 +39,14 @@ describe('Command Registry', () => {
 
       // Dev & debug
       expect(commandNames).toContain('/debug');
-      expect(commandNames).toContain('/neo-dev');
+      expect(commandNames).toContain('/dev');
 
       // Tasks
       expect(commandNames).toContain('/tasks');
       expect(commandNames).toContain('/task');
+
+      // Misc
+      expect(commandNames).toContain('/brag');
 
       // Help & exit
       expect(commandNames).toContain('/help');
@@ -89,22 +92,22 @@ describe('Command Registry', () => {
     });
   });
 
-  // ─── /neo-dev command ────────────────────────────────────────
+  // ─── /dev command ────────────────────────────────────────
 
-  describe('/neo-dev command', () => {
+  describe('/dev command', () => {
     it('exists in the registry', () => {
-      const neoDev = COMMANDS.find((c) => c.command === '/neo-dev');
+      const neoDev = COMMANDS.find((c) => c.command === '/dev');
       expect(neoDev).toBeDefined();
     });
 
     it('is available on both CLI and Telegram', () => {
-      const neoDev = COMMANDS.find((c) => c.command === '/neo-dev')!;
+      const neoDev = COMMANDS.find((c) => c.command === '/dev')!;
       expect(neoDev.channels).toContain('cli');
       expect(neoDev.channels).toContain('telegram');
     });
 
     it('has args for on/off', () => {
-      const neoDev = COMMANDS.find((c) => c.command === '/neo-dev')!;
+      const neoDev = COMMANDS.find((c) => c.command === '/dev')!;
       expect(neoDev.args).toBeDefined();
       expect(neoDev.args).toContain('on');
       expect(neoDev.args).toContain('off');
@@ -143,7 +146,8 @@ describe('Command Registry', () => {
       '/debug',
       '/tasks',
       '/task',
-      '/neo-dev',
+      '/dev',
+      '/brag',
       '/help',
     ];
 

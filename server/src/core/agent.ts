@@ -40,6 +40,7 @@ import {
   isShortFollowup,
 } from '../utils/patterns.js';
 import { getRecentLogs } from '../utils/logger.js';
+import { UserProfileRepo } from '../db/user-profile-repo.js';
 import { ClaudeBridge } from './claude-bridge.js';
 import { ErrorRecovery } from './error-recovery.js';
 import { SessionQueue } from './session-queue.js';
@@ -66,12 +67,15 @@ export class NeoAgent {
   private transcript: SessionTranscript;
   private longTermMemory: LongTermMemory;
   private memoryExtractor: MemoryExtractor;
+  private userProfiles: UserProfileRepo;
 
   // Per-session state for cross-channel features
+  // modelOverrides, lastInputs, neoDevModes are keyed by userKey (per-user in groups)
   private modelOverrides = new Map<string, ModelTier>();
   private lastInputs = new Map<string, string>();
-  private compactedContexts = new Map<string, string>();
   private neoDevModes = new Map<string, boolean>();
+  // compactedContexts is keyed by sessionKey (shared in groups)
+  private compactedContexts = new Map<string, string>();
   private autoCompactThreshold: number;
   private costBudget: number;
 
@@ -110,6 +114,7 @@ export class NeoAgent {
     this.transcript = new SessionTranscript(db);
     this.longTermMemory = new LongTermMemory(db);
     this.memoryExtractor = new MemoryExtractor();
+    this.userProfiles = new UserProfileRepo(db);
 
     // Config
     this.autoCompactThreshold = parseInt(process.env.NEO_AUTO_COMPACT_TURNS ?? '15', 10);
@@ -133,8 +138,65 @@ export class NeoAgent {
 
   // ─── Public API ────────────────────────────────────────────
 
+  /**
+   * Build a per-user key for user-specific settings (model, retry, dev mode).
+   * In group chats, different users get different keys.
+   * In DMs / CLI, this equals the sessionKey.
+   */
+  private userKey(message: InboundMessage): string {
+    return message.metadata?.isGroup
+      ? `${message.sessionKey}:${message.userId}`
+      : message.sessionKey;
+  }
+
+  private static NAME_PREFIX_RE = /^(i'?m|i am|my name is|call me|it'?s|it is)\s+/i;
+
   async handleMessage(message: InboundMessage): Promise<AgentResponse> {
-    this.lastInputs.set(message.sessionKey, message.content);
+    this.lastInputs.set(this.userKey(message), message.content);
+
+    // Telegram DM onboarding — ask new users for their name
+    // Skip for: groups, empty userId, slash commands, media-only messages
+    if (
+      message.channel === 'telegram' &&
+      !message.metadata?.isGroup &&
+      message.userId &&
+      message.userId.length > 0 &&
+      !message.content.trim().startsWith('/') &&
+      !message.attachments?.length
+    ) {
+      const profileId = `telegram:${message.userId}`;
+      const profile = this.userProfiles.get(profileId);
+
+      if (!profile) {
+        // First contact — create profile and ask for name
+        this.userProfiles.upsert(profileId, 'telegram', {});
+        log.debug('New Telegram DM user, requesting name', { profileId });
+        return {
+          content: `Hey there! 🕶️ I'm ${this.config.agentName}.\n\nWhat's your name? I'd like to know who I'm talking to.`,
+          model: 'sonnet',
+        };
+      }
+
+      if (!profile.onboarded) {
+        // They're replying with their name
+        const name = message.content.trim().replace(NeoAgent.NAME_PREFIX_RE, '').trim();
+        if (name && name.length > 0 && name.length < 50) {
+          this.userProfiles.upsert(profileId, 'telegram', { displayName: name, onboarded: true });
+          log.debug('User onboarded', { profileId, name });
+          return {
+            content: `Nice to meet you, **${name}**! 🕶️\n\nI'm ready to help. Just send me a message anytime.`,
+            model: 'sonnet',
+          };
+        }
+        // Doesn't look like a name — onboard with Telegram display name as fallback
+        const fallbackName = (message.metadata?.senderName as string) || undefined;
+        this.userProfiles.upsert(profileId, 'telegram', {
+          displayName: fallbackName,
+          onboarded: true,
+        });
+      }
+    }
+
     return this.queue.enqueue(message.sessionKey, async () => {
       try {
         return await this._executeLoop(message);
@@ -144,14 +206,20 @@ export class NeoAgent {
     });
   }
 
-  /** Set a one-shot model override for the next message on a session key. */
-  setModelOverride(sessionKey: string, model: ModelTier): void {
-    this.modelOverrides.set(sessionKey, model);
+  /**
+   * Set a one-shot model override.
+   * Key should be a userKey (per-user in groups) or sessionKey (DMs/CLI).
+   */
+  setModelOverride(key: string, model: ModelTier): void {
+    this.modelOverrides.set(key, model);
   }
 
-  /** Get the last user input for a session key (for /retry). */
-  getLastInput(sessionKey: string): string | undefined {
-    return this.lastInputs.get(sessionKey);
+  /**
+   * Get the last user input (for /retry).
+   * Key should be a userKey (per-user in groups) or sessionKey (DMs/CLI).
+   */
+  getLastInput(key: string): string | undefined {
+    return this.lastInputs.get(key);
   }
 
   /** Get the transcript instance (for /export). */
@@ -164,24 +232,65 @@ export class NeoAgent {
     return this.sessions;
   }
 
-  /** Toggle neo-dev mode: agent can freely edit the neo-agent codebase. */
-  setNeoDevMode(sessionKey: string, on: boolean): void {
-    this.neoDevModes.set(sessionKey, on);
-    log.debug('Neo-Dev mode toggled', { sessionKey, on });
+  /**
+   * Observe a group message without triggering the agent pipeline.
+   * Records it into the group session transcript so the bot has context
+   * when it IS tagged later.
+   */
+  observeGroupMessage(message: InboundMessage): void {
+    if (!message.metadata?.isGroup) return;
+    const sessionUserId = `group:${message.channelId}`;
+    const session = this.sessions.resolveOrCreate(
+      message.channelId,
+      sessionUserId,
+      message.channel,
+    );
+    const senderName = (message.metadata?.senderName as string) ?? message.userId;
+
+    // Build display content — add media descriptor if text is empty
+    let displayContent = message.content;
+    if (!displayContent && message.attachments?.length) {
+      const types = message.attachments.map((a) => a.type).join(', ');
+      displayContent = `(${types})`;
+    }
+    if (!displayContent) return; // Nothing to record
+
+    const content = `[${senderName}]: ${displayContent}`;
+    try {
+      this.transcript.record(session.id, 'user', content);
+      log.debug('Group message observed', { sessionId: session.id, senderName });
+    } catch (err) {
+      log.debug('Group observation failed', { error: (err as Error).message });
+    }
   }
 
-  /** Check if neo-dev mode is active for a session. */
-  isNeoDevMode(sessionKey: string): boolean {
-    return this.neoDevModes.get(sessionKey) ?? false;
+  /**
+   * Toggle neo-dev mode. Disabled in group chats for security.
+   * Key should be a userKey or sessionKey.
+   */
+  setNeoDevMode(key: string, on: boolean): void {
+    this.neoDevModes.set(key, on);
+    log.debug('Neo-Dev mode toggled', { key, on });
+  }
+
+  /** Check if neo-dev mode is active. */
+  isNeoDevMode(key: string): boolean {
+    return this.neoDevModes.get(key) ?? false;
   }
 
   // ─── Core Pipeline ─────────────────────────────────────────
 
   private async _executeLoop(message: InboundMessage): Promise<AgentResponse> {
+    const isGroup = !!message.metadata?.isGroup;
+    const uKey = this.userKey(message);
+    const senderName = (message.metadata?.senderName as string) ?? undefined;
+
     log.debug('Pipeline start', {
       channel: message.channel,
       userId: message.userId,
       contentLength: message.content.length,
+      isGroup,
+      senderName,
     });
 
     // 0. Media processing (voice → text, image → analysis, document → text)
@@ -192,16 +301,17 @@ export class NeoAgent {
     const sanitized = await this.guardrails.process(enriched);
     log.debug('Guardrails passed', { modified: sanitized.content !== enriched.content });
 
-    // 2. Session
+    // 2. Session — group chats share one session keyed by channelId
+    const sessionUserId = isGroup ? `group:${message.channelId}` : message.userId;
     const session = this.sessions.resolveOrCreate(
       message.channelId,
-      message.userId,
+      sessionUserId,
       message.channel,
     );
     log.debug('Session resolved', { sessionId: session.id, totalTokens: session.totalTokens ?? 0 });
 
     // 3. Context assembly — system prompt + compacted context + debug injection
-    let systemPrompt = this.buildSystemPrompt(session, sanitized.content);
+    let systemPrompt = this.buildSystemPrompt(session, message);
 
     // Inject compacted context if available
     const compacted = this.compactedContexts.get(message.sessionKey);
@@ -237,12 +347,12 @@ export class NeoAgent {
       maxTurns: route.maxTurns,
     });
 
-    // 4a. One-shot model override (/model command)
-    const override = this.modelOverrides.get(message.sessionKey);
+    // 4a. One-shot model override (/model command) — per-user in groups
+    const override = this.modelOverrides.get(uKey);
     if (override) {
       log.debug('Model override applied', { from: route.selectedModel, to: override });
       route.selectedModel = override;
-      this.modelOverrides.delete(message.sessionKey);
+      this.modelOverrides.delete(uKey);
     } else if (isShortFollowup(sanitized.content) && session.lastModelTier) {
       // Short followup model reuse
       log.debug('Short followup, reusing model', { model: session.lastModelTier });
@@ -294,7 +404,8 @@ export class NeoAgent {
 
     // 6. Execute via Claude Bridge
     const timeoutMs = calculateTimeoutMs(classification.complexity);
-    const isNeoDev = this.neoDevModes.get(message.sessionKey) ?? false;
+    // Neo-dev mode is per-user and disabled in groups for security
+    const isNeoDev = isGroup ? false : (this.neoDevModes.get(uKey) ?? false);
 
     const runOpts: any = {
       cwd: isNeoDev ? process.cwd().replace(/\/server$/, '') : this.config.workspacePath,
@@ -393,12 +504,14 @@ export class NeoAgent {
       this.compactedContexts.delete(message.sessionKey);
     }
 
-    // Record transcript
+    // Record transcript (prefix with sender name in groups for attribution)
     const responseContent = validated.validatedContent ?? validated.content ?? '';
-    this.recordTranscript(session.id, sanitized.content, responseContent, outputTokens);
+    const transcriptContent =
+      isGroup && senderName ? `[${senderName}]: ${sanitized.content}` : sanitized.content;
+    this.recordTranscript(session.id, transcriptContent, responseContent, outputTokens);
 
-    // Extract memories
-    this.extractMemories(sanitized.content, session.id);
+    // Extract memories (with sender attribution in groups)
+    this.extractMemories(sanitized.content, session.id, senderName);
 
     // Auto-compact check
     this.autoCompactIfNeeded(session, message.sessionKey, newTurns).catch((err) =>
@@ -430,13 +543,27 @@ export class NeoAgent {
 
   // ─── System Prompt ──────────────────────────────────────────
 
-  private buildSystemPrompt(session: any, query?: string): string {
-    const base = `You are ${this.config.agentName}, a personal AI agent for ${this.config.userName}. Session: ${session.id}\n\nFormat your responses using markdown when appropriate: **bold** for emphasis, \`code\` for technical terms, code blocks for snippets, - for lists, and [text](url) for links. Keep formatting natural and readable — don't over-format simple replies.`;
+  private buildSystemPrompt(session: any, message: InboundMessage): string {
+    // Resolve the user's display name — per-user profile for Telegram DMs, global fallback otherwise
+    let userName = this.config.userName;
+    if (message.channel === 'telegram' && message.userId && !message.metadata?.isGroup) {
+      const profile = this.userProfiles.get(`telegram:${message.userId}`);
+      if (profile?.displayName) userName = profile.displayName;
+    }
 
-    if (!query) return base;
+    let base = `You are ${this.config.agentName}, a personal AI agent for ${userName}. Session: ${session.id}\n\nFormat your responses using markdown when appropriate: **bold** for emphasis, \`code\` for technical terms, code blocks for snippets, - for lists, and [text](url) for links. Keep formatting natural and readable — don't over-format simple replies.`;
+
+    // Group chat awareness
+    const metadata = message.metadata;
+    if (metadata?.isGroup) {
+      const sender = metadata.senderName ?? 'a user';
+      base += `\n\nYou are in a Telegram group chat. This message is from **${sender}**. Address them by name when relevant. Multiple people may be in this conversation — keep track of who said what.`;
+    }
+
+    if (!message.content) return base;
 
     // Inject relevant skill contexts (Phase 6 — Kung Fu)
-    const skillContexts = this.skillMatcher.getActiveContexts(query);
+    const skillContexts = this.skillMatcher.getActiveContexts(message.content);
     if (skillContexts.length === 0) return base;
 
     return [base, '', '# Active Skills', '', ...skillContexts].join('\n');
@@ -460,14 +587,18 @@ export class NeoAgent {
     }
   }
 
-  private extractMemories(userContent: string, sessionId: string): void {
+  private extractMemories(userContent: string, sessionId: string, senderName?: string): void {
     try {
       const extracted = this.memoryExtractor.extractFromMessage(userContent, sessionId);
       for (const entry of extracted) {
+        // Tag with sender for attribution in group chats
+        if (senderName) {
+          entry.tags = [...(entry.tags ?? []), `sender:${senderName}`];
+        }
         this.longTermMemory.store(entry);
       }
       if (extracted.length > 0) {
-        log.debug('Memories extracted', { count: extracted.length });
+        log.debug('Memories extracted', { count: extracted.length, senderName });
       }
     } catch (err) {
       log.debug('Memory extraction failed', { error: (err as Error).message });

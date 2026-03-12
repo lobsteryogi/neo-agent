@@ -442,7 +442,7 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
       rl.prompt();
       return true;
     }
-    const arg = input.slice(8).trim().toLowerCase();
+    const arg = input.slice(4).trim().toLowerCase();
     if (arg === 'on') {
       deps.setNeoDevMode(true);
       console.log();
@@ -467,6 +467,25 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
       );
       console.log();
     }
+    rl.prompt();
+    return true;
+  }
+
+  // ─── /brag ────────────────────────────────────────────
+  if (input === '/brag') {
+    console.log();
+    console.log(color.phosphor('  🕶️  Neo-Agent — Your Personal AI Powerhouse'));
+    console.log();
+    console.log('  💬  Chat Naturally — Context-aware conversations that remember.');
+    console.log('  🧠  Long-Term Memory — Preferences, decisions, and facts across sessions.');
+    console.log('  🔧  Code & Build — Read, write, edit code. Run commands. Debug issues.');
+    console.log('  🌐  Web Research — Search the internet, fetch pages, extract information.');
+    console.log('  📎  Media — Voice notes, images, documents, videos — all processed.');
+    console.log('  🤖  Smart Routing — Auto-picks the best AI model for each task.');
+    console.log('  ⚡  Multi-Channel — CLI and Telegram, same brain, everywhere.');
+    console.log('  🎯  Skills & Sub-Agents — Specialized workflows for complex tasks.');
+    console.log('  📋  Task Tracking — Manage tasks with /task and /tasks.');
+    console.log();
     rl.prompt();
     return true;
   }

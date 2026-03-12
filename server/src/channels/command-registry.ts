@@ -76,6 +76,7 @@ export const COMMANDS: CommandDef[] = [
     description: 'Toggle self-edit mode (neo-agent codebase)',
     channels: ['cli', 'telegram'],
   },
+  { command: '/brag', description: 'Show off what Neo can do', channels: ['cli', 'telegram'] },
   { command: '/help', description: 'Show available commands', channels: ['cli', 'telegram'] },
   { command: '/exit', description: 'Disconnect from the Matrix', channels: ['cli'] },
 ];

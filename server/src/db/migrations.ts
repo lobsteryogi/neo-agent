@@ -272,6 +272,21 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE sessions ADD COLUMN total_cost REAL NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 10,
+    name: 'user_profiles',
+    up: `
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        id TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        display_name TEXT,
+        onboarded INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_profiles_channel ON user_profiles(channel);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
