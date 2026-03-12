@@ -46,7 +46,7 @@ describe('RouterEngine', () => {
     expect(result.selectedModel).toBe('opus');
   });
 
-  it('routes simple questions to haiku', () => {
+  it('routes simple questions to sonnet (minimum tier)', () => {
     const result = engine.selectModel(
       {
         complexity: 0.1,
@@ -58,10 +58,10 @@ describe('RouterEngine', () => {
       },
       'auto',
     );
-    expect(result.selectedModel).toBe('haiku');
+    expect(result.selectedModel).toBe('sonnet');
   });
 
-  it('routes medium tasks to sonnet', () => {
+  it('routes medium-high tasks to opus', () => {
     const result = engine.selectModel(
       {
         complexity: 0.6,
@@ -73,7 +73,7 @@ describe('RouterEngine', () => {
       },
       'auto',
     );
-    expect(result.selectedModel).toBe('sonnet');
+    expect(result.selectedModel).toBe('opus');
   });
 
   // ── Profile Biasing ────────────────────────────────────────

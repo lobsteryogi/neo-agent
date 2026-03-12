@@ -71,6 +71,7 @@ export class NeoAgent {
   private modelOverrides = new Map<string, ModelTier>();
   private lastInputs = new Map<string, string>();
   private compactedContexts = new Map<string, string>();
+  private neoDevModes = new Map<string, boolean>();
   private autoCompactThreshold: number;
   private costBudget: number;
 
@@ -159,6 +160,17 @@ export class NeoAgent {
   /** Get the session manager (for session commands). */
   getSessionManager(): SessionManager {
     return this.sessions;
+  }
+
+  /** Toggle neo-dev mode: agent can freely edit the neo-agent codebase. */
+  setNeoDevMode(sessionKey: string, on: boolean): void {
+    this.neoDevModes.set(sessionKey, on);
+    log.debug('Neo-Dev mode toggled', { sessionKey, on });
+  }
+
+  /** Check if neo-dev mode is active for a session. */
+  isNeoDevMode(sessionKey: string): boolean {
+    return this.neoDevModes.get(sessionKey) ?? false;
   }
 
   // ─── Core Pipeline ─────────────────────────────────────────
@@ -280,11 +292,13 @@ export class NeoAgent {
 
     // 6. Execute via Claude Bridge
     const timeoutMs = calculateTimeoutMs(classification.complexity);
+    const isNeoDev = this.neoDevModes.get(message.sessionKey) ?? false;
 
     const runOpts: any = {
-      cwd: this.config.workspacePath,
+      cwd: isNeoDev ? process.cwd().replace(/\/server$/, '') : this.config.workspacePath,
       model: route.selectedModel,
-      permissionMode: this.config.permissionMode,
+      permissionMode: isNeoDev ? 'bypassPermissions' : this.config.permissionMode,
+      allowDangerouslySkipPermissions: isNeoDev,
       allowedTools: route.allowedTools ?? [
         'Read',
         'Write',

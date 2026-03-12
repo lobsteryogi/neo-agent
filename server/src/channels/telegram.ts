@@ -50,6 +50,8 @@ export interface TelegramCommandDeps {
     },
   ) => Promise<void>;
   taskRepo?: TaskRepo;
+  setNeoDevMode?: (sessionKey: string, on: boolean) => void;
+  isNeoDevMode?: (sessionKey: string) => boolean;
 }
 
 export class TelegramChannel implements ChannelAdapter {
@@ -669,6 +671,28 @@ export class TelegramChannel implements ChannelAdapter {
         }
         const task = this.deps.taskRepo.create({ title: arg, createdBy: 'user' });
         await ctx.reply(`✅ Task created: ${task.title} [${task.id.slice(0, 8)}]`);
+        return true;
+      }
+
+      case '/neo-dev': {
+        if (!this.deps?.setNeoDevMode || !this.deps?.isNeoDevMode) {
+          await ctx.reply('⚠️ Neo-Dev mode not available.');
+          return true;
+        }
+        const chatId3 = (ctx as any).message?.chat?.id;
+        const sessionKey3 = chatId3 ? `telegram:${chatId3}` : '';
+        if (arg === 'on') {
+          this.deps.setNeoDevMode(sessionKey3, true);
+          await ctx.reply('🟢 Neo-Dev mode ON — agent can freely edit neo-agent codebase');
+        } else if (arg === 'off') {
+          this.deps.setNeoDevMode(sessionKey3, false);
+          await ctx.reply('⚪ Neo-Dev mode OFF — back to normal permissions');
+        } else {
+          const current = this.deps.isNeoDevMode(sessionKey3) ? 'ON' : 'OFF';
+          await ctx.reply(
+            `Neo-Dev mode: ${current}\nUsage: /neo-dev <on|off>\nWhen ON, agent can edit the neo-agent codebase without permission prompts.`,
+          );
+        }
         return true;
       }
 

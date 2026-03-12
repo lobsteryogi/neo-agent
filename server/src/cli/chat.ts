@@ -167,6 +167,10 @@ let modelOverride: import('@neo-agent/shared').ModelTier | null = null;
 // ─── Last input for /retry ────────────────────────────────────
 let lastInput = '';
 
+// ─── Neo-Dev mode: self-edit neo-agent codebase ──────────────
+let neoDevMode = false;
+const NEO_AGENT_ROOT = process.cwd().replace(/\/server$/, '');
+
 // ─── Cost budget ──────────────────────────────────────────────
 const COST_BUDGET = parseFloat(process.env.NEO_COST_BUDGET ?? '0');
 
@@ -241,7 +245,10 @@ async function processInput(input: string): Promise<void> {
     // Dynamic timeout
     const timeoutMs = calculateTimeoutMs(classification.complexity);
 
-    const permMode = process.env.NEO_PERMISSION_MODE || 'default';
+    const permMode = neoDevMode
+      ? 'bypassPermissions'
+      : process.env.NEO_PERMISSION_MODE || 'default';
+    const effectiveCwd = neoDevMode ? NEO_AGENT_ROOT : WORKSPACE;
 
     // Inject compacted context from /compact into system prompt
     let effectiveSystemPrompt = systemPrompt;
@@ -256,13 +263,13 @@ async function processInput(input: string): Promise<void> {
     }
 
     const runOpts: any = {
-      cwd: WORKSPACE,
+      cwd: effectiveCwd,
       model: route.selectedModel,
       maxTurns: route.maxTurns ?? 10,
       timeoutMs,
       systemPrompt: effectiveSystemPrompt,
       permissionMode: permMode,
-      allowDangerouslySkipPermissions: permMode === 'bypassPermissions',
+      allowDangerouslySkipPermissions: neoDevMode || permMode === 'bypassPermissions',
       allowedTools: [
         'Read',
         'Write',
@@ -510,6 +517,13 @@ const commandDeps = {
   exportTranscript,
   transcript,
   taskRepo: new TaskRepo(db),
+  get neoDevMode() {
+    return neoDevMode;
+  },
+  setNeoDevMode: (on: boolean) => {
+    neoDevMode = on;
+    log.debug('Neo-Dev mode toggled', { neoDevMode: on, cwd: on ? NEO_AGENT_ROOT : WORKSPACE });
+  },
 };
 
 // ─── Main Loop ────────────────────────────────────────────────

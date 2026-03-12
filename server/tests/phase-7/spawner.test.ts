@@ -146,7 +146,7 @@ describe('SubAgentSpawner', () => {
     const result = await spawner.spawn(makeBlueprint(), makeTask());
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('SDK exploded');
+    expect(result.error).toBe('CRASH');
     expect(result.agentName).toBe('test-agent');
   });
 

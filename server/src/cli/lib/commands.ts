@@ -39,6 +39,8 @@ export interface CommandDeps {
   exportTranscript: () => Promise<void>;
   transcript?: unknown; // available for future use
   taskRepo?: TaskRepo;
+  neoDevMode?: boolean;
+  setNeoDevMode?: (on: boolean) => void;
 }
 
 // ─── Handler ──────────────────────────────────────────────────
@@ -427,6 +429,44 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
       ),
     );
     console.log();
+    rl.prompt();
+    return true;
+  }
+
+  // ─── /neo-dev ─────────────────────────────────────────────
+  if (input.startsWith('/neo-dev')) {
+    if (!deps.setNeoDevMode) {
+      console.log();
+      console.log(statusIcon.warn('Neo-dev mode not available.'));
+      console.log();
+      rl.prompt();
+      return true;
+    }
+    const arg = input.slice(8).trim().toLowerCase();
+    if (arg === 'on') {
+      deps.setNeoDevMode(true);
+      console.log();
+      console.log(
+        statusIcon.ok(
+          `${color.phosphor('Neo-Dev mode ON')} ${color.dim('— agent can freely edit neo-agent codebase')}`,
+        ),
+      );
+      console.log();
+    } else if (arg === 'off') {
+      deps.setNeoDevMode(false);
+      console.log();
+      console.log(statusIcon.ok(`Neo-Dev mode ${color.dim('OFF')} — back to normal permissions`));
+      console.log();
+    } else {
+      const current = deps.neoDevMode ? color.phosphor('ON') : color.dim('OFF');
+      console.log();
+      console.log(statusIcon.info(`Neo-Dev mode: ${current}`));
+      console.log(color.dim('    Usage: /neo-dev <on|off>'));
+      console.log(
+        color.dim('    When ON, agent can edit the neo-agent codebase without permission prompts.'),
+      );
+      console.log();
+    }
     rl.prompt();
     return true;
   }

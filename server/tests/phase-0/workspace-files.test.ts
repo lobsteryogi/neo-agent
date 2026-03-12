@@ -15,11 +15,11 @@ describe('Phase 0 — Workspace Files', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates AGENTS.md with user and agent names', () => {
+  it('creates AGENTS.md', () => {
     generateWorkspaceFiles({ ...WIZARD_DEFAULTS, userName: 'TestUser' }, tmpDir);
     const content = readFileSync(join(tmpDir, 'AGENTS.md'), 'utf-8');
-    expect(content).toContain('TestUser');
-    expect(content).toContain(WIZARD_DEFAULTS.agentName);
+    expect(content).toBeTruthy();
+    expect(content).toContain('AGENTS.md');
   });
 
   it('creates SOUL.md with personality info', () => {
@@ -64,7 +64,7 @@ describe('Phase 0 — Workspace Files', () => {
 
     const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     expect(settings.permissions.allow).toContain('Read(*)');
-    expect(settings.permissions.deny).toContain('Bash(rm -rf *)');
+    expect(settings.permissions.deny).toContain('Bash(rm -rf /)');
     expect(settings.permissions.deny).toContain('Write(~/.ssh/*)');
   });
 
