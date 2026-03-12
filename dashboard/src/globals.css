@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 10%;
+    --card: 0 0% 99%;
+    --card-foreground: 0 0% 10%;
+    --border: 0 0% 89%;
+    --input: 0 0% 94%;
+    --primary: 138 100% 32%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 138 20% 94%;
+    --secondary-foreground: 138 100% 20%;
+    --muted: 0 0% 94%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 138 60% 94%;
+    --accent-foreground: 138 100% 20%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 138 100% 32%;
+    --radius: 0.5rem;
+
+    /* Priority colors */
+    --priority-low: #6b7280;
+    --priority-medium: #3b82f6;
+    --priority-high: #f59e0b;
+    --priority-critical: #ef4444;
+
+    /* Column backgrounds */
+    --col-backlog: hsl(0 0% 96%);
+    --col-in-progress: hsl(138 60% 94%);
+    --col-review: hsl(45 80% 92%);
+    --col-done: hsl(0 0% 93%);
+    --col-error: hsl(0 80% 96%);
+  }
+
+  .dark {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 88%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 88%;
+    --border: 0 0% 12%;
+    --input: 0 0% 8%;
+    --primary: 138 100% 50%;
+    --primary-foreground: 0 0% 4%;
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 138 100% 50%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 35%;
+    --accent: 138 100% 50%;
+    --accent-foreground: 0 0% 4%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 138 100% 50%;
+
+    --col-backlog: hsl(0 0% 8%);
+    --col-in-progress: hsl(138 100% 5%);
+    --col-review: hsl(45 50% 7%);
+    --col-done: hsl(0 0% 6%);
+    --col-error: hsl(0 60% 8%);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    @apply bg-background text-foreground font-mono;
+    min-height: 100vh;
+  }
+
+  #root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  ::selection {
+    @apply bg-accent text-accent-foreground;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-background;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted rounded;
+  }
+}
+
+/* ─── Markdown Result Styles ────────────────────────────────────────────── */
+.markdown-result {
+  @apply text-foreground;
+}
+.markdown-result h1 {
+  @apply text-base font-semibold mt-3 mb-1.5 text-foreground;
+}
+.markdown-result h2 {
+  @apply text-[13px] font-semibold mt-2.5 mb-1 text-foreground;
+}
+.markdown-result h3 {
+  @apply text-[12px] font-semibold mt-2 mb-1 text-foreground;
+}
+.markdown-result p {
+  @apply mb-2 leading-relaxed;
+}
+.markdown-result ul {
+  @apply list-disc list-inside mb-2 space-y-0.5;
+}
+.markdown-result ol {
+  @apply list-decimal list-inside mb-2 space-y-0.5;
+}
+.markdown-result li {
+  @apply leading-relaxed;
+}
+.markdown-result code {
+  @apply bg-muted text-primary px-1 py-0.5 rounded text-[11px] font-mono;
+}
+.markdown-result pre {
+  @apply bg-muted rounded-md p-2 mb-2 overflow-x-auto;
+}
+.markdown-result pre code {
+  @apply bg-transparent p-0 text-[11px];
+}
+.markdown-result blockquote {
+  @apply border-l-2 border-primary/40 pl-3 text-muted-foreground italic mb-2;
+}
+.markdown-result a {
+  @apply text-primary underline;
+}
+.markdown-result strong {
+  @apply font-semibold;
+}
+.markdown-result hr {
+  @apply border-border my-3;
+}
+.markdown-result table {
+  @apply w-full text-[11px] border-collapse mb-2;
+}
+.markdown-result th {
+  @apply border border-border px-2 py-1 bg-muted font-semibold text-left;
+}
+.markdown-result td {
+  @apply border border-border px-2 py-1;
+}

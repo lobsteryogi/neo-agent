@@ -226,6 +226,9 @@ ${answers.geminiApiKey ? `GEMINI_API_KEY=${answers.geminiApiKey}` : '# GEMINI_AP
 # ─── Telegram ──────────────────────────────────────────────────
 ${answers.telegramBotToken ? `TELEGRAM_BOT_TOKEN=${answers.telegramBotToken}` : '# TELEGRAM_BOT_TOKEN='}
 
+# ─── Tailscale ─────────────────────────────────────────────────
+NEO_TAILSCALE_ENABLED=${answers.tailscaleEnabled ? 'true' : 'false'}
+
 # ─── Sync ──────────────────────────────────────────────────────
 ${answers.syncRepo ? `NEO_SYNC_REPO=${answers.syncRepo}` : '# NEO_SYNC_REPO='}
 # NEO_SYNC_INTERVAL=30
@@ -265,6 +268,8 @@ function updateEnvValues(envPath: string, answers: WizardAnswers): void {
   if (answers.telegramBotToken) updates.TELEGRAM_BOT_TOKEN = answers.telegramBotToken;
   if (answers.geminiApiKey) updates.GEMINI_API_KEY = answers.geminiApiKey;
   if (answers.syncRepo) updates.NEO_SYNC_REPO = answers.syncRepo;
+  if (answers.tailscaleEnabled !== undefined)
+    updates.NEO_TAILSCALE_ENABLED = answers.tailscaleEnabled ? 'true' : 'false';
 
   let changed = 0;
   for (const [key, value] of Object.entries(updates)) {

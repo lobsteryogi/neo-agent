@@ -1,45 +1,46 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, type NavLinkProps } from 'react-router-dom';
+import { Moon, Sun } from 'lucide-react';
+import { Switch } from './ui/switch';
+import { useTheme } from '../contexts/theme-context';
+import { cn } from '../lib/utils';
 
-const linkStyle = (isActive: boolean): React.CSSProperties => ({
-  color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
-  textDecoration: 'none',
-  padding: '6px 14px',
-  borderRadius: 'var(--radius)',
-  background: isActive ? 'var(--accent-dim)' : 'transparent',
-  transition: 'all 0.15s',
-  fontSize: '13px',
-  letterSpacing: '0.05em',
-});
+function NavItem({ to, end, children }: Pick<NavLinkProps, 'to' | 'end' | 'children'>) {
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      className={({ isActive }) =>
+        cn(
+          'text-xs px-3 py-1.5 rounded-md tracking-wider transition-colors',
+          isActive
+            ? 'bg-primary/10 text-primary border border-primary/30'
+            : 'text-muted-foreground hover:text-foreground',
+        )
+      }
+    >
+      {children}
+    </NavLink>
+  );
+}
 
 export default function NavBar() {
+  const { theme, toggleTheme } = useTheme();
+
   return (
-    <nav
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        padding: '12px 20px',
-        borderBottom: '1px solid var(--border)',
-        background: 'var(--bg-secondary)',
-      }}
-    >
-      <span
-        style={{
-          color: 'var(--text-primary)',
-          fontWeight: 700,
-          fontSize: '15px',
-          letterSpacing: '0.15em',
-          marginRight: '20px',
-        }}
-      >
-        NEO-AGENT
-      </span>
-      <NavLink to="/" style={({ isActive }) => linkStyle(isActive)} end>
+    <nav className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-card">
+      <span className="text-primary font-bold text-sm tracking-[0.2em] mr-4">NEO-AGENT</span>
+      <NavItem to="/" end>
         Home
-      </NavLink>
-      <NavLink to="/board" style={({ isActive }) => linkStyle(isActive)}>
-        Board
-      </NavLink>
+      </NavItem>
+      <NavItem to="/board">Board</NavItem>
+      <NavItem to="/geo">GEO-SEO</NavItem>
+      <NavItem to="/cron">Cron</NavItem>
+      <NavItem to="/skills">Skills</NavItem>
+      <div className="ml-auto flex items-center gap-2">
+        <Sun className="h-3.5 w-3.5 text-muted-foreground" />
+        <Switch checked={theme === 'dark'} onCheckedChange={toggleTheme} />
+        <Moon className="h-3.5 w-3.5 text-muted-foreground" />
+      </div>
     </nav>
   );
 }

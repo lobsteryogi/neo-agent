@@ -21,6 +21,10 @@ interface TaskRow {
   labels: string;
   session_id: string | null;
   team_id: string | null;
+  agent_result: string | null;
+  model: string | null;
+  notes: string;
+  started_at: number | null;
   created_by: string;
   created_at: number;
   updated_at: number;
@@ -38,6 +42,10 @@ function rowToTask(row: TaskRow): KanbanTask {
     labels: safeJsonParse(row.labels, []),
     sessionId: row.session_id ?? undefined,
     teamId: row.team_id ?? undefined,
+    agentResult: row.agent_result ?? undefined,
+    model: (row.model ?? undefined) as KanbanTask['model'],
+    notes: row.notes,
+    startedAt: row.started_at ?? undefined,
     createdBy: row.created_by as 'user' | 'agent',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -54,6 +62,8 @@ export interface CreateTaskInput {
   sessionId?: string;
   teamId?: string;
   createdBy?: 'user' | 'agent';
+  model?: 'sonnet' | 'opus' | 'haiku';
+  notes?: string;
 }
 
 export interface UpdateTaskInput {
@@ -63,6 +73,9 @@ export interface UpdateTaskInput {
   labels?: string[];
   sessionId?: string;
   teamId?: string;
+  agentResult?: string;
+  model?: 'sonnet' | 'opus' | 'haiku';
+  notes?: string;
 }
 
 export class TaskRepo {
@@ -131,8 +144,8 @@ export class TaskRepo {
 
       this.db
         .prepare(
-          `INSERT INTO tasks (id, title, description, status, priority, position, labels, session_id, team_id, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO tasks (id, title, description, status, priority, position, labels, session_id, team_id, created_by, model, notes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -145,6 +158,8 @@ export class TaskRepo {
           input.sessionId ?? null,
           input.teamId ?? null,
           input.createdBy ?? 'user',
+          input.model ?? null,
+          input.notes ?? '',
           now,
           now,
         );
@@ -189,6 +204,18 @@ export class TaskRepo {
         sets.push('team_id = ?');
         params.push(fields.teamId || null);
       }
+      if (fields.agentResult !== undefined) {
+        sets.push('agent_result = ?');
+        params.push(fields.agentResult || null);
+      }
+      if (fields.model !== undefined) {
+        sets.push('model = ?');
+        params.push(fields.model || null);
+      }
+      if (fields.notes !== undefined) {
+        sets.push('notes = ?');
+        params.push(fields.notes);
+      }
 
       if (sets.length === 0) return existing;
 
@@ -211,12 +238,13 @@ export class TaskRepo {
 
       const now = Date.now();
       const completedAt = status === 'done' ? now : null;
+      const startedAt = status === 'in_progress' ? now : null;
 
       this.db
         .prepare(
-          'UPDATE tasks SET status = ?, position = ?, updated_at = ?, completed_at = ? WHERE id = ?',
+          'UPDATE tasks SET status = ?, position = ?, updated_at = ?, completed_at = ?, started_at = ? WHERE id = ?',
         )
-        .run(status, position, now, completedAt, id);
+        .run(status, position, now, completedAt, startedAt, id);
 
       return this.get(id);
     } catch (err) {
@@ -230,6 +258,38 @@ export class TaskRepo {
       return result.changes > 0;
     } catch (err) {
       throw new Error(`Failed to delete task: ${getErrorMessage(err)}`);
+    }
+  }
+
+  bulkDelete(ids: string[]): number {
+    if (ids.length === 0) return 0;
+    try {
+      const placeholders = ids.map(() => '?').join(',');
+      const result = this.db.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).run(...ids);
+      return result.changes;
+    } catch (err) {
+      throw new Error(`Failed to bulk delete tasks: ${getErrorMessage(err)}`);
+    }
+  }
+
+  bulkMove(ids: string[], status: TaskStatus): KanbanTask[] {
+    if (ids.length === 0) return [];
+    try {
+      const maxPos = this.db
+        .prepare('SELECT MAX(position) as maxPos FROM tasks WHERE status = ?')
+        .get(status) as { maxPos: number | null } | undefined;
+      let pos = (maxPos?.maxPos ?? 0) + 1;
+      const moved: KanbanTask[] = [];
+      const tx = this.db.transaction(() => {
+        for (const id of ids) {
+          const task = this.move(id, status, pos++);
+          if (task) moved.push(task);
+        }
+      });
+      tx();
+      return moved;
+    } catch (err) {
+      throw new Error(`Failed to bulk move tasks: ${getErrorMessage(err)}`);
     }
   }
 }

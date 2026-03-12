@@ -47,6 +47,10 @@ export class SkillRegistry {
     return this.skills.has(name);
   }
 
+  remove(name: string): boolean {
+    return this.skills.delete(name);
+  }
+
   get size(): number {
     return this.skills.size;
   }

@@ -145,6 +145,9 @@ export async function runWizard(): Promise<void> {
         answers.syncRepo
           ? color.dim(`Sync Repo:   ✓ configured`)
           : color.dim(`Sync Repo:   ─ skipped`),
+        answers.tailscaleEnabled
+          ? color.dim(`Tailscale:   ✓ enabled`)
+          : color.dim(`Tailscale:   ─ disabled`),
       ],
       'info',
     ),

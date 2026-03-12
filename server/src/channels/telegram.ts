@@ -674,7 +674,7 @@ export class TelegramChannel implements ChannelAdapter {
         return true;
       }
 
-      case '/neo-dev': {
+      case '/dev': {
         if (!this.deps?.setNeoDevMode || !this.deps?.isNeoDevMode) {
           await ctx.reply('⚠️ Neo-Dev mode not available.');
           return true;
@@ -690,7 +690,7 @@ export class TelegramChannel implements ChannelAdapter {
         } else {
           const current = this.deps.isNeoDevMode(sessionKey3) ? 'ON' : 'OFF';
           await ctx.reply(
-            `Neo-Dev mode: ${current}\nUsage: /neo-dev <on|off>\nWhen ON, agent can edit the neo-agent codebase without permission prompts.`,
+            `Neo-Dev mode: ${current}\nUsage: /dev <on|off>\nWhen ON, agent can edit the neo-agent codebase without permission prompts.`,
           );
         }
         return true;

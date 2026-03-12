@@ -17,22 +17,14 @@ export default function KanbanPage() {
 
   if (loading) {
     return (
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--text-dim)',
-        }}
-      >
+      <div className="flex-1 flex items-center justify-center text-primary/40 text-sm tracking-widest animate-pulse">
         Loading tasks...
       </div>
     );
   }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+    <div className="flex-1 flex flex-col">
       <KanbanBoard />
       {selectedTaskId && <TaskDetailPanel />}
     </div>

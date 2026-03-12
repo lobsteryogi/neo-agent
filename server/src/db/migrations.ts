@@ -214,6 +214,53 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    version: 7,
+    name: 'task_agent_result',
+    up: `
+      ALTER TABLE tasks ADD COLUMN agent_result TEXT;
+    `,
+  },
+  {
+    version: 9,
+    name: 'task_extra_fields',
+    up: `
+      ALTER TABLE tasks ADD COLUMN model TEXT;
+      ALTER TABLE tasks ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+      ALTER TABLE tasks ADD COLUMN started_at INTEGER;
+    `,
+  },
+  {
+    version: 8,
+    name: 'task_status_error',
+    up: `
+      CREATE TABLE tasks_new (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'backlog'
+          CHECK(status IN ('backlog', 'in_progress', 'review', 'done', 'error')),
+        priority TEXT NOT NULL DEFAULT 'medium'
+          CHECK(priority IN ('low', 'medium', 'high', 'critical')),
+        position REAL NOT NULL DEFAULT 0,
+        labels TEXT NOT NULL DEFAULT '[]',
+        session_id TEXT,
+        team_id TEXT,
+        created_by TEXT NOT NULL DEFAULT 'user'
+          CHECK(created_by IN ('user', 'agent')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        agent_result TEXT
+      );
+      INSERT INTO tasks_new SELECT id, title, description, status, priority, position, labels,
+        session_id, team_id, created_by, created_at, updated_at, completed_at, agent_result
+        FROM tasks;
+      DROP TABLE tasks;
+      ALTER TABLE tasks_new RENAME TO tasks;
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, position);
+    `,
+  },
+  {
     version: 6,
     name: 'extended_session_state',
     up: `

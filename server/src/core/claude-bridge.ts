@@ -40,6 +40,12 @@ export class ClaudeBridge extends EventEmitter {
       // Dynamic import to avoid issues if SDK isn't installed
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
+      // Unset CLAUDECODE so the spawned agent isn't blocked by the nested-session check
+      const env: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (k !== 'CLAUDECODE' && v !== undefined) env[k] = v;
+      }
+
       const queryOpts = {
         prompt,
         options: {
@@ -51,6 +57,7 @@ export class ClaudeBridge extends EventEmitter {
           allowedTools: opts.allowedTools,
           permissionMode: opts.permissionMode,
           allowDangerouslySkipPermissions: opts.allowDangerouslySkipPermissions,
+          env,
         } as Record<string, unknown>,
       };
 

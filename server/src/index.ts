@@ -47,10 +47,12 @@ async function main(): Promise<void> {
   const { ToolRegistry } = await import('./tools/registry.js');
   const { BrowserTool } = await import('./tools/browser.js');
   const { SchedulerTool } = await import('./tools/scheduler.js');
+  const { TailscaleTool } = await import('./tools/tailscale.js');
 
   const toolRegistry = new ToolRegistry();
   toolRegistry.register(new BrowserTool());
   toolRegistry.register(new SchedulerTool());
+  toolRegistry.register(new TailscaleTool());
   console.log(status.ok(`Tool registry loaded (${toolRegistry.size} tools)`));
 
   // Health endpoint (passes tool registry for real health checks)
@@ -67,26 +69,14 @@ async function main(): Promise<void> {
     res.json(health);
   });
 
-  // Phase 6 — Skills
+  // Phase 6 — Skills (registry loaded here; routes registered after bridge is ready)
   const { SkillRegistry } = await import('./skills/index.js');
   const skillRegistry = new SkillRegistry();
   const skillsDir = join(process.cwd(), 'workspace', 'skills');
   skillRegistry.loadFromDirectory(skillsDir);
-
-  app.get('/api/skills', (_req, res) => {
-    const skills = skillRegistry.getAll().map(({ name, description, tags }) => ({
-      name,
-      description,
-      tags,
-    }));
-    res.json(skills);
-  });
-
-  app.get('/api/skills/:name', (req, res) => {
-    const skill = skillRegistry.get(req.params.name);
-    if (!skill) return res.status(404).json({ error: 'Skill not found' });
-    res.json(skill);
-  });
+  // Also load global Claude Code skills from ~/.claude/skills/
+  const claudeSkillsDir = join(process.env.HOME ?? '/root', '.claude', 'skills');
+  skillRegistry.loadFromDirectory(claudeSkillsDir);
 
   // Phase 7 — Agent Blueprints & Teams
   const { AgentRegistry } = await import('./agents/index.js');
@@ -100,6 +90,11 @@ async function main(): Promise<void> {
   const bridge = new ClaudeBridge();
   const spawner = new SubAgentSpawner(bridge, '/tmp/neo-agents');
   const orchestrator = new Orchestrator(spawner, agentRegistry, db);
+
+  // Skills routes (needs bridge for AI generation)
+  const { registerSkillRoutes } = await import('./api/skills-routes.js');
+  registerSkillRoutes(app, skillRegistry, skillsDir, bridge);
+  console.log(status.ok(`Skills loaded (${skillRegistry.size} skills)`));
 
   app.get('/api/agents/blueprints', (_req, res) => {
     const blueprints = agentRegistry.getAll().map(({ name, description, model }) => ({
@@ -135,7 +130,10 @@ async function main(): Promise<void> {
 
   // Phase 8 — Kanban Task Board
   const { registerTaskRoutes } = await import('./api/task-routes.js');
+  const { TaskRepo } = await import('./db/task-repo.js');
+  const { TaskRunner } = await import('./core/task-runner.js');
   // Broadcast wired after WebChannel starts (below)
+  const taskRepo = new TaskRepo(db);
   const taskRoutesBinder = (broadcast: (event: { type: string; [key: string]: unknown }) => void) =>
     registerTaskRoutes(app, db, broadcast);
 
@@ -148,8 +146,27 @@ async function main(): Promise<void> {
   const { WebChannel } = await import('./channels/web.js');
   const webChannel = new WebChannel({ port: WS_PORT, token: WS_TOKEN });
   await webChannel.start();
-  taskRoutesBinder(webChannel.broadcast.bind(webChannel));
+  const broadcast = webChannel.broadcast.bind(webChannel);
+  taskRoutesBinder(broadcast);
   console.log(status.ok(`WebSocket channel listening on port ${color.matrix(String(WS_PORT))}`));
+
+  // Cron routes (uses SchedulerTool + ClaudeBridge + broadcast)
+  const { registerCronRoutes } = await import('./api/cron-routes.js');
+  const schedulerTool = toolRegistry.get('cron') as InstanceType<typeof SchedulerTool>;
+  registerCronRoutes(app, schedulerTool, broadcast, bridge);
+  console.log(status.ok('Cron routes loaded'));
+
+  // Phase 8b — Task Runner: auto-picks up backlog tasks and runs agents
+  const taskRunner = new TaskRunner(taskRepo, broadcast, {
+    pollIntervalMs: 5000,
+    maxConcurrent: 2,
+    workspaceDir: process.env.NEO_WORKSPACE_PATH
+      ? join(process.cwd(), process.env.NEO_WORKSPACE_PATH)
+      : join(process.cwd(), 'workspace'),
+    model: process.env.NEO_DEFAULT_MODEL || 'sonnet',
+  });
+  taskRunner.start();
+  console.log(status.ok('Task runner active (polling backlog every 5s)'));
 
   if (process.env.TELEGRAM_BOT_TOKEN) {
     // Instantiate agent for Telegram channel
@@ -263,6 +280,7 @@ async function main(): Promise<void> {
     console.log();
     console.log(color.dim('  "See you in the next simulation." 🕶️'));
     console.log(digitalRain(1, 50));
+    taskRunner.stop();
     server.close();
     closeDb();
     process.exit(0);

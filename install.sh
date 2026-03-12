@@ -171,6 +171,23 @@ else
   warn "Install manually: npm install -g agent-browser && agent-browser install"
 fi
 
+# ─── Tailscale (optional) ────────────────────────────────────
+step "Tailscale"
+
+if command -v tailscale &>/dev/null; then
+  TS_STATE=$(tailscale status --json 2>/dev/null | grep -o '"BackendState":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+  if [[ "$TS_STATE" == "Running" ]]; then
+    TS_TAILNET=$(tailscale status --json 2>/dev/null | grep -o '"Name":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
+    ok "Tailscale connected${TS_TAILNET:+ (${TS_TAILNET})}"
+  else
+    warn "Tailscale installed but not connected (state: ${TS_STATE})"
+    warn "Run 'tailscale up' to connect to your tailnet"
+  fi
+else
+  warn "Tailscale not installed — tailnet features will be unavailable"
+  warn "Install from https://tailscale.com/download"
+fi
+
 # ─── Build (optional) ────────────────────────────────────────
 if [[ "$RUN_BUILD" == true ]]; then
   step "Build"

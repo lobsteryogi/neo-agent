@@ -1,8 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useTaskStore } from '../stores/task-store';
 
-const WS_PORT = 3142;
-const WS_TOKEN = 'change-me-to-a-random-string';
+const WS_TOKEN = import.meta.env.VITE_WS_TOKEN ?? 'change-me-to-a-random-string';
 
 export function useWebSocket() {
   const applyEvent = useTaskStore((s) => s.applyEvent);
@@ -16,8 +15,9 @@ export function useWebSocket() {
       if (unmounted) return;
 
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const host = window.location.hostname;
-      const ws = new WebSocket(`${protocol}://${host}:${WS_PORT}?token=${WS_TOKEN}`);
+      const host = window.location.host; // includes port of current page
+      // Route through Vite proxy (/ws) so only the dashboard port needs to be open
+      const ws = new WebSocket(`${protocol}://${host}/ws?token=${WS_TOKEN}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -27,7 +27,7 @@ export function useWebSocket() {
       ws.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
-          if (data.type?.startsWith('task:')) {
+          if (data.type?.startsWith('task:') || data.type?.startsWith('agent:')) {
             applyEvent(data);
           }
         } catch {

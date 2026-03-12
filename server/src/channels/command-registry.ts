@@ -71,7 +71,7 @@ export const COMMANDS: CommandDef[] = [
     channels: ['cli', 'telegram'],
   },
   {
-    command: '/neo-dev',
+    command: '/dev',
     args: '[on|off]',
     description: 'Toggle self-edit mode (neo-agent codebase)',
     channels: ['cli', 'telegram'],

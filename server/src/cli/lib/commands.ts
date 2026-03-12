@@ -433,8 +433,8 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
     return true;
   }
 
-  // ─── /neo-dev ─────────────────────────────────────────────
-  if (input.startsWith('/neo-dev')) {
+  // ─── /dev ─────────────────────────────────────────────
+  if (input.startsWith('/dev')) {
     if (!deps.setNeoDevMode) {
       console.log();
       console.log(statusIcon.warn('Neo-dev mode not available.'));
@@ -461,7 +461,7 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
       const current = deps.neoDevMode ? color.phosphor('ON') : color.dim('OFF');
       console.log();
       console.log(statusIcon.info(`Neo-Dev mode: ${current}`));
-      console.log(color.dim('    Usage: /neo-dev <on|off>'));
+      console.log(color.dim('    Usage: /dev <on|off>'));
       console.log(
         color.dim('    When ON, agent can edit the neo-agent codebase without permission prompts.'),
       );

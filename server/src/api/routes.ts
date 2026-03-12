@@ -7,6 +7,7 @@
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
 import { wrapRoute } from './route-handler.js';
+import { registerGeoRoutes } from './geo-routes.js';
 
 export function registerRoutes(app: Express, db: Database.Database): void {
   // Sessions list
@@ -37,4 +38,7 @@ export function registerRoutes(app: Express, db: Database.Database): void {
       res.json(messages);
     }),
   );
+
+  // GEO-SEO routes
+  registerGeoRoutes(app);
 }

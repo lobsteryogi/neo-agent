@@ -1,14 +1,14 @@
 import { useState } from 'react';
-import type { TaskPriority } from '@neo-agent/shared';
+import type { KanbanTask, TaskPriority } from '@neo-agent/shared';
 import { useTaskStore } from '../stores/task-store';
-import {
-  TASK_PRIORITIES,
-  inputStyle,
-  textareaStyle,
-  buttonGhost,
-  buttonPrimary,
-  priorityToggleStyle,
-} from '../styles/common';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
+import { cn } from '../lib/utils';
+
+const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'critical'];
+const MODELS: KanbanTask['model'][] = ['sonnet', 'opus', 'haiku'];
 
 interface Props {
   onClose: () => void;
@@ -19,80 +19,82 @@ export default function TaskCreateForm({ onClose }: Props) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
+  const [model, setModel] = useState<KanbanTask['model']>('sonnet');
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
-    await createTask(title.trim(), { description: description.trim(), priority });
+    await createTask(title.trim(), { description: description.trim(), priority, model });
     onClose();
   }
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.7)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 100,
-      }}
-      onClick={onClose}
-    >
-      <form
-        onSubmit={handleSubmit}
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-lg)',
-          padding: '20px',
-          width: '400px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-        }}
-      >
-        <h3 style={{ color: 'var(--text-primary)', fontSize: '14px', letterSpacing: '0.1em' }}>
-          NEW TASK
-        </h3>
-        <input
-          autoFocus
-          placeholder="Task title..."
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          style={inputStyle}
-        />
-        <textarea
-          placeholder="Description (optional)"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={3}
-          style={textareaStyle}
-        />
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Priority:</label>
-          {TASK_PRIORITIES.map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPriority(p)}
-              style={priorityToggleStyle(priority === p)}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onClose} style={buttonGhost}>
-            Cancel
-          </button>
-          <button type="submit" style={buttonPrimary}>
-            Create
-          </button>
-        </div>
-      </form>
-    </div>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New Task</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <Input
+            autoFocus
+            placeholder="Task title..."
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <Textarea
+            placeholder="Description (optional) — the agent will use this to understand what to do"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+          />
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">Priority:</span>
+              {PRIORITIES.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPriority(p)}
+                  className={cn(
+                    'text-[10px] px-2 py-0.5 rounded border font-mono uppercase tracking-wide transition-colors',
+                    priority === p
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/30',
+                  )}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">Model:</span>
+              {MODELS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setModel(m)}
+                  className={cn(
+                    'text-[10px] px-2 py-0.5 rounded border font-mono uppercase tracking-wide transition-colors',
+                    model === m
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/30',
+                  )}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end pt-1">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary">
+              Create
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

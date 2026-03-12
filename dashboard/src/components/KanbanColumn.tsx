@@ -1,13 +1,17 @@
 import type { KanbanTask, TaskStatus } from '@neo-agent/shared';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
+import { Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import TaskCard from './TaskCard';
+import { Button } from './ui/button';
+import { cn } from '../lib/utils';
 
-const COLUMN_COLORS: Record<TaskStatus, string> = {
-  backlog: 'var(--column-backlog)',
-  in_progress: 'var(--column-in-progress)',
-  review: 'var(--column-review)',
-  done: 'var(--column-done)',
+const COLUMN_BG: Record<TaskStatus, string> = {
+  backlog: 'bg-[var(--col-backlog)]',
+  in_progress: 'bg-[var(--col-in-progress)]',
+  review: 'bg-[var(--col-review)]',
+  done: 'bg-[var(--col-done)]',
+  error: 'bg-[var(--col-error)]',
 };
 
 interface Props {
@@ -15,78 +19,79 @@ interface Props {
   label: string;
   tasks: KanbanTask[];
   onAddClick?: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-export default function KanbanColumn({ id, label, tasks, onAddClick }: Props) {
+export default function KanbanColumn({
+  id,
+  label,
+  tasks,
+  onAddClick,
+  isCollapsed,
+  onToggleCollapse,
+}: Props) {
   const { setNodeRef } = useDroppable({ id });
   const taskIds = tasks.map((t) => t.id);
+
+  if (isCollapsed) {
+    return (
+      <div
+        className={cn(
+          'w-10 flex flex-col items-center rounded-xl border border-border overflow-hidden shrink-0 cursor-pointer',
+          COLUMN_BG[id],
+        )}
+        onClick={onToggleCollapse}
+        title={`${label} (${tasks.length})`}
+      >
+        <div className="flex flex-col items-center gap-1.5 py-3">
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          <span
+            className={cn(
+              'text-[10px] font-semibold tracking-widest uppercase writing-vertical',
+              id === 'error' ? 'text-destructive' : 'text-primary',
+            )}
+            style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+          >
+            {label}
+          </span>
+          <span className="text-[10px] text-muted-foreground font-mono">{tasks.length}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
       ref={setNodeRef}
-      style={{
-        flex: 1,
-        minWidth: '260px',
-        maxWidth: '340px',
-        display: 'flex',
-        flexDirection: 'column',
-        background: COLUMN_COLORS[id],
-        borderRadius: 'var(--radius-lg)',
-        border: '1px solid var(--border)',
-        overflow: 'hidden',
-      }}
+      className={cn(
+        'flex-1 min-w-[260px] max-w-[340px] flex flex-col rounded-xl border border-border overflow-hidden',
+        COLUMN_BG[id],
+      )}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px 14px 8px',
-        }}
-      >
-        <span
-          style={{
-            fontSize: '12px',
-            fontWeight: 600,
-            letterSpacing: '0.1em',
-            color: 'var(--text-secondary)',
-            textTransform: 'uppercase',
-          }}
+      <div className="flex items-center justify-between px-3.5 pt-3 pb-2">
+        <button
+          onClick={onToggleCollapse}
+          className="flex items-center gap-1.5 hover:opacity-70 transition-opacity"
         >
-          {label}
-          <span style={{ color: 'var(--text-muted)', marginLeft: '8px', fontWeight: 400 }}>
-            {tasks.length}
-          </span>
-        </span>
-        {id === 'backlog' && onAddClick && (
-          <button
-            onClick={onAddClick}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border)',
-              color: 'var(--text-primary)',
-              borderRadius: 'var(--radius)',
-              padding: '2px 8px',
-              fontSize: '16px',
-              cursor: 'pointer',
-              lineHeight: '20px',
-              fontFamily: 'var(--font-mono)',
-            }}
+          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+          <span
+            className={cn(
+              'text-[11px] font-semibold tracking-widest uppercase',
+              id === 'error' ? 'text-destructive' : 'text-primary',
+            )}
           >
-            +
-          </button>
+            {label}
+            <span className="text-muted-foreground ml-2 font-normal">{tasks.length}</span>
+          </span>
+        </button>
+        {id === 'backlog' && onAddClick && (
+          <Button variant="ghost" size="icon" onClick={onAddClick} className="h-6 w-6">
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
         )}
       </div>
-      <div
-        style={{
-          flex: 1,
-          padding: '4px 8px 8px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          overflowY: 'auto',
-        }}
-      >
+      <div className="flex-1 px-2 pb-2 flex flex-col gap-1.5 overflow-y-auto">
         <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
           {tasks.map((task) => (
             <TaskCard key={task.id} task={task} />

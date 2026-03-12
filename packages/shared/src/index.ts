@@ -344,7 +344,7 @@ export interface DecomposeDecision {
 
 // ─── Kanban Tasks ─────────────────────────────────────────
 
-export type TaskStatus = 'backlog' | 'in_progress' | 'review' | 'done';
+export type TaskStatus = 'backlog' | 'in_progress' | 'review' | 'done' | 'error';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
 
 export interface KanbanTask {
@@ -357,10 +357,30 @@ export interface KanbanTask {
   labels: string[];
   sessionId?: string;
   teamId?: string;
+  agentResult?: string;
+  model?: 'sonnet' | 'opus' | 'haiku';
+  notes?: string;
+  startedAt?: number;
   createdBy: 'user' | 'agent';
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+}
+
+// ─── Agent Activity Events ─────────────────────────────────
+
+export type AgentEventType = 'assigned' | 'progress' | 'completed' | 'failed';
+
+export interface AgentActivityEvent {
+  type: AgentEventType;
+  taskId: string;
+  agentName: string;
+  timestamp: number;
+  message: string;
+  durationMs?: number;
+  error?: string;
+  eventKind?: 'text' | 'tool_use' | 'system';
+  toolName?: string;
 }
 
 export const KANBAN_COLUMNS: { id: TaskStatus; label: string }[] = [
@@ -368,6 +388,7 @@ export const KANBAN_COLUMNS: { id: TaskStatus; label: string }[] = [
   { id: 'in_progress', label: 'In Progress' },
   { id: 'review', label: 'Review' },
   { id: 'done', label: 'Done' },
+  { id: 'error', label: 'Error' },
 ];
 
 // ─── Browser ──────────────────────────────────────────────────

@@ -113,7 +113,9 @@ export class NeoAgent {
 
     // Config
     this.autoCompactThreshold = parseInt(process.env.NEO_AUTO_COMPACT_TURNS ?? '15', 10);
+    if (isNaN(this.autoCompactThreshold)) this.autoCompactThreshold = 15;
     this.costBudget = parseFloat(process.env.NEO_COST_BUDGET ?? '0');
+    if (isNaN(this.costBudget)) this.costBudget = 0;
 
     // Phase 5 — Phone Lines: Media processing (optional — needs GROQ_API_KEY)
     const groqKey = process.env.GROQ_API_KEY;
