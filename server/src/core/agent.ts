@@ -430,6 +430,11 @@ export class NeoAgent {
       maxTurns: route.maxTurns,
       resume: !!session.sdkSessionId,
     });
+
+    // Snapshot workspace before bridge run to detect new/modified files
+    const effectiveCwd = runOpts.cwd as string;
+    const beforeSnap = this.snapshotWorkspace(effectiveCwd);
+
     let response = await this.bridge.run(sanitized.content, runOpts);
 
     // If resume failed, retry as fresh conversation
@@ -452,9 +457,12 @@ export class NeoAgent {
       response = await this.bridge.run(sanitized.content, retryOpts);
     }
 
-    // Capture SDK session ID and written files from response messages
+    // Capture SDK session ID from response messages
     const sdkSessionId = this.extractSdkSessionId(response);
-    const writtenFiles = this.extractWrittenFiles(response);
+
+    // Detect new/modified files by diffing workspace snapshots
+    const afterSnap = this.snapshotWorkspace(effectiveCwd);
+    const writtenFiles = this.diffSnapshots(beforeSnap, afterSnap);
 
     // 7. Harness
     const validated = await this.harness.process(response, session);
@@ -706,24 +714,50 @@ ${conversationText}
     return undefined;
   }
 
-  /** Extract file paths written/created by Write tool during this turn. */
-  private extractWrittenFiles(response: any): string[] {
-    const messages = response?.data?.messages;
-    if (!Array.isArray(messages)) return [];
-    const files: string[] = [];
-    for (const msg of messages) {
-      const content = msg?.message?.content;
-      if (!Array.isArray(content)) continue;
-      for (const block of content) {
-        if (block.type !== 'tool_use') continue;
-        if (block.name !== 'Write') continue;
-        const filePath = (block.input as any)?.file_path;
-        if (typeof filePath === 'string' && !files.includes(filePath)) {
-          files.push(filePath);
+  /**
+   * Snapshot file mtimes in a workspace directory.
+   * Returns a map of filePath → mtime for all files (non-recursive top-level + 1 deep).
+   */
+  private snapshotWorkspace(dir: string): Map<string, number> {
+    const snap = new Map<string, number>();
+    try {
+      const { readdirSync, statSync } = require('fs') as typeof import('fs');
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = join(dir, entry.name);
+        if (entry.isFile()) {
+          snap.set(full, statSync(full).mtimeMs);
+        } else if (entry.isDirectory() && !entry.name.startsWith('.')) {
+          // One level deep
+          try {
+            const sub = readdirSync(full, { withFileTypes: true });
+            for (const s of sub) {
+              if (s.isFile()) {
+                const sf = join(full, s.name);
+                snap.set(sf, statSync(sf).mtimeMs);
+              }
+            }
+          } catch {
+            /* skip unreadable dirs */
+          }
         }
       }
+    } catch {
+      /* workspace may not exist yet */
     }
-    return files;
+    return snap;
+  }
+
+  /** Find new or modified files by comparing before/after snapshots. */
+  private diffSnapshots(before: Map<string, number>, after: Map<string, number>): string[] {
+    const changed: string[] = [];
+    for (const [path, mtime] of after) {
+      const prev = before.get(path);
+      if (prev === undefined || mtime > prev) {
+        changed.push(path);
+      }
+    }
+    return changed;
   }
 
   private looksLikeExecution(content: string): boolean {
