@@ -499,8 +499,23 @@ export class NeoAgent {
       this.compactedContexts.delete(message.sessionKey);
     }
 
+    // Parse [ATTACH:/path] markers from response and strip them from displayed content
+    let responseContent = validated.validatedContent ?? validated.content ?? '';
+    const attachMarkerRe = /\[ATTACH:(\/[^\]]+)\]/g;
+    const markerFiles: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = attachMarkerRe.exec(responseContent)) !== null) {
+      markerFiles.push(match[1]);
+    }
+    responseContent = responseContent
+      .replace(attachMarkerRe, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    // Merge snapshot-detected files with explicitly attached files (deduplicated)
+    const allFiles = [...new Set([...writtenFiles, ...markerFiles])];
+
     // Record transcript (prefix with sender name in groups for attribution)
-    const responseContent = validated.validatedContent ?? validated.content ?? '';
     const transcriptContent =
       isGroup && senderName ? `[${senderName}]: ${sanitized.content}` : sanitized.content;
     this.recordTranscript(session.id, transcriptContent, responseContent, outputTokens);
@@ -527,6 +542,7 @@ export class NeoAgent {
       turns: newTurns,
       tokensUsed: outputTokens,
       costUsd,
+      files: allFiles.length > 0 ? allFiles : undefined,
     });
     return {
       content: responseContent,
@@ -535,7 +551,7 @@ export class NeoAgent {
       inputTokens,
       costUsd,
       warnings: warnings.length > 0 ? warnings : undefined,
-      files: writtenFiles.length > 0 ? writtenFiles : undefined,
+      files: allFiles.length > 0 ? allFiles : undefined,
     };
   }
 
@@ -550,6 +566,11 @@ export class NeoAgent {
     }
 
     let base = `You are ${this.config.agentName}, a personal AI agent for ${userName}. Session: ${session.id}\n\nFormat your responses using markdown when appropriate: **bold** for emphasis, \`code\` for technical terms, code blocks for snippets, - for lists, and [text](url) for links. Keep formatting natural and readable — don't over-format simple replies.`;
+
+    // Telegram channel: file attachment capability
+    if (message.channel === 'telegram') {
+      base += `\n\nYou can send files to the user in Telegram. To attach a file, include \`[ATTACH:/absolute/path/to/file]\` in your response (one per line). The file will be sent as a document. Use this for images, PDFs, code files, or any file the user asks for. The marker will be stripped from the visible message. Any files you create with the Write tool are auto-attached.`;
+    }
 
     // Group chat awareness
     const metadata = message.metadata;
