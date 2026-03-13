@@ -255,6 +255,8 @@ async function main(): Promise<void> {
       setNeoDevMode: (key: string, on: boolean) => agent.setNeoDevMode(key, on),
       isNeoDevMode: (key: string) => agent.isNeoDevMode(key),
       observeGroupMessage: (message) => agent.observeGroupMessage(message),
+      resetSession: (channel, channelId, userId) =>
+        agent.resetSession(channel as any, channelId, userId),
     });
     tgChannel.onMessage(async (message) => {
       return agent.handleMessage(message);

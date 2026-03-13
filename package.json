@@ -1,6 +1,6 @@
 {
   "name": "neo-agent",
-  "version": "0.1.41",
+  "version": "0.1.42",
   "private": true,
   "description": "A quirky AI agent facing existential crisis in the AI world — powered by Claude Code SDK",
   "scripts": {

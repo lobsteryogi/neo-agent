@@ -58,6 +58,8 @@ export interface TelegramCommandDeps {
   isNeoDevMode?: (key: string) => boolean;
   /** Record a group message into the transcript without triggering agent. */
   observeGroupMessage?: (message: InboundMessage) => void;
+  /** End the agent's active session so the next message gets a fresh context. */
+  resetSession?: (channel: string, channelId: string, userId?: string) => void;
 }
 
 export class TelegramChannel implements ChannelAdapter {
@@ -481,7 +483,11 @@ export class TelegramChannel implements ChannelAdapter {
 
   async handleCommand(
     text: string,
-    ctx: { reply: (text: string) => Promise<unknown>; me?: { username: string } },
+    ctx: {
+      reply: (text: string) => Promise<unknown>;
+      me?: { username: string };
+      message?: { chat?: { id: number }; from?: { id: number } };
+    },
   ): Promise<boolean> {
     const [rawCmd, ...args] = text.split(' ');
     // Strip @botname suffix from commands in group chats (e.g. /dev@neo_bot → /dev)
@@ -601,8 +607,16 @@ export class TelegramChannel implements ChannelAdapter {
           await ctx.reply('⚠️ Commands not wired yet.');
           return true;
         }
+        // End the agent pipeline's active session so SDK context is not resumed
+        const chatId = String(ctx.message?.chat?.id ?? '');
+        const fromId = String(ctx.message?.from?.id ?? '');
+        if (chatId && this.deps.resetSession) {
+          this.deps.resetSession('telegram', chatId, fromId || undefined);
+        }
         this.deps.sessionMgr.create();
-        await ctx.reply(`✅ New session: ${this.deps.sessionMgr.current.id}`);
+        await ctx.reply(
+          `✅ New session: ${this.deps.sessionMgr.current.id}\nConversation context cleared.`,
+        );
         return true;
       }
 

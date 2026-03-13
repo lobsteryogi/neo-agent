@@ -11,6 +11,7 @@
 
 import type {
   AgentResponse,
+  Channel,
   InboundMessage,
   ModelTier,
   NeoConfig,
@@ -279,6 +280,19 @@ export class NeoAgent {
   /** Check if neo-dev mode is active. */
   isNeoDevMode(key: string): boolean {
     return this.neoDevModes.get(key) ?? false;
+  }
+
+  /**
+   * End the current active session for a channel/user so the next message
+   * starts a fresh conversation (no SDK session resume, no prior context).
+   * For DMs: channelId and userId are typically the same (Telegram user ID).
+   * For groups: channelId is the group chat ID.
+   */
+  resetSession(channel: Channel, channelId: string, userId?: string): void {
+    const sessionUserId = userId ?? channelId;
+    const session = this.sessions.resolveOrCreate(channelId, sessionUserId, channel);
+    this.sessions.end(session.id);
+    log.info('Session reset', { channel, channelId, sessionId: session.id });
   }
 
   // ─── Core Pipeline ─────────────────────────────────────────
