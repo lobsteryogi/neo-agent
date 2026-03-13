@@ -12,6 +12,7 @@ import type { RoutingProfile } from '@neo-agent/shared';
 import 'dotenv/config';
 import * as readline from 'readline';
 import { ClaudeBridge } from '../core/claude-bridge.js';
+import { NeoHome } from '../core/neo-home.js';
 import { getQuote, QUOTES } from '../data/matrix-quotes.js';
 import { getDb } from '../db/connection.js';
 import { GuardrailPipeline } from '../guardrails/index.js';
@@ -61,8 +62,11 @@ enableLogRelay();
 
 const log = logger('chat');
 
+// Ensure ~/.neo-agent structure exists
+NeoHome.ensureStructure();
+
 log.debug('Initializing chat', {
-  workspace: process.env.NEO_WORKSPACE_PATH || './workspace',
+  workspace: NeoHome.workspace('cli', 'cli'),
   logLevel: process.env.NEO_LOG_LEVEL || 'info',
   permissionMode: process.env.NEO_PERMISSION_MODE || 'default',
   defaultModel: process.env.NEO_DEFAULT_MODEL || 'sonnet',
@@ -85,7 +89,7 @@ const memoryExtractor = new MemoryExtractor();
 
 // ─── Identity & Config ───────────────────────────────────────
 
-const WORKSPACE = process.env.NEO_WORKSPACE_PATH || './workspace';
+const WORKSPACE = NeoHome.workspace('cli', 'cli');
 
 // ─── Browser Availability ─────────────────────────────────────
 import { AgentBrowser } from '../browser/index.js';

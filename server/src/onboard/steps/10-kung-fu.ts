@@ -9,6 +9,7 @@
 import * as clack from '@clack/prompts';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { NeoHome } from '../../core/neo-home.js';
 import { color } from '../../utils/terminal.js';
 import { showStepHeader } from '../progress.js';
 import type { StepFn, StepResult } from '../types.js';
@@ -16,8 +17,7 @@ import type { StepFn, StepResult } from '../types.js';
 export const run: StepFn = async (_ctx, meta): Promise<StepResult> => {
   showStepHeader(meta);
 
-  const workspacePath = join(process.cwd(), 'workspace');
-  const skillsDir = join(workspacePath, 'skills');
+  const skillsDir = NeoHome.skills;
 
   const s = clack.spinner();
   s.start('Scanning workspace for skills...');

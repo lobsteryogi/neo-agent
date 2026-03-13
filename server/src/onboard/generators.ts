@@ -15,6 +15,7 @@ import type { WizardAnswers } from '@neo-agent/shared';
 import { randomBytes } from 'crypto';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
+import { NeoHome } from '../core/neo-home.js';
 import { ensureDir } from '../utils/fs.js';
 import { fileURLToPath } from 'url';
 
@@ -175,7 +176,8 @@ function generateAgentBlueprints(workspacePath: string, templatesDir: string): G
 // ─── Generate .env ─────────────────────────────────────────────
 
 export function generateEnvFile(answers: WizardAnswers): void {
-  const envPath = join(process.cwd(), '.env');
+  NeoHome.ensureStructure();
+  const envPath = NeoHome.configEnv;
 
   if (existsSync(envPath)) {
     // Update wizard-managed values in the existing .env (preserves user-added keys)
@@ -191,8 +193,6 @@ export function generateEnvFile(answers: WizardAnswers): void {
 NEO_PORT=${answers.port}
 NEO_WS_PORT=${answers.wsPort}
 NEO_WS_TOKEN=${wsToken}
-NEO_WORKSPACE_PATH=./workspace
-NEO_DB_PATH=./neo.db
 
 # ─── Claude Code ───────────────────────────────────────────────
 NEO_PERMISSION_MODE=${answers.permissionMode}

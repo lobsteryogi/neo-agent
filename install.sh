@@ -188,6 +188,14 @@ else
   warn "Install from https://tailscale.com/download"
 fi
 
+# ─── Neo Home Directory ─────────────────────────────────────
+step "Neo Home"
+
+NEO_HOME="${NEO_HOME:-$HOME/.neo-agent}"
+info "Creating ~/.neo-agent directory structure..."
+mkdir -p "$NEO_HOME"/{logs,backups,shared/{skills,agents,stories,.claude},workspaces,tmp/neo-agents}
+ok "Neo home: ${BOLD}${NEO_HOME}${RESET}"
+
 # ─── Build (optional) ────────────────────────────────────────
 if [[ "$RUN_BUILD" == true ]]; then
   step "Build"

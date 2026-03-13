@@ -7,6 +7,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { join } from 'path';
+import { NeoHome } from './core/neo-home.js';
 import { closeDb, getDb } from './db/connection.js';
 import { getErrorMessage } from './utils/errors.js';
 import { startLogRelay } from './utils/log-relay.js';
@@ -31,6 +32,13 @@ async function main(): Promise<void> {
   console.log(NEO_BANNER);
   console.log(MATRIX_DIVIDER);
   await sleep(300);
+
+  // Ensure ~/.neo-agent directory structure exists
+  NeoHome.ensureStructure();
+
+  // Migrate from old layout (./data/, ./workspace/) if needed
+  const { migrateToNeoHome } = await import('./core/neo-home-migrate.js');
+  migrateToNeoHome();
 
   // Start log relay — receives logs from remote processes (chat CLI, etc.)
   startLogRelay();
@@ -72,11 +80,9 @@ async function main(): Promise<void> {
   // Phase 6 — Skills (registry loaded here; routes registered after bridge is ready)
   const { SkillRegistry } = await import('./skills/index.js');
   const skillRegistry = new SkillRegistry();
-  const skillsDir = join(process.cwd(), 'workspace', 'skills');
-  skillRegistry.loadFromDirectory(skillsDir);
+  skillRegistry.loadFromDirectory(NeoHome.skills);
   // Also load global Claude Code skills from ~/.claude/skills/
-  const claudeSkillsDir = join(process.env.HOME ?? '/root', '.claude', 'skills');
-  skillRegistry.loadFromDirectory(claudeSkillsDir);
+  skillRegistry.loadFromDirectory(NeoHome.claudeSkills);
 
   // Phase 7 — Agent Blueprints & Teams
   const { AgentRegistry } = await import('./agents/index.js');
@@ -84,16 +90,15 @@ async function main(): Promise<void> {
   const { ClaudeBridge } = await import('./core/claude-bridge.js');
 
   const agentRegistry = new AgentRegistry();
-  const agentsDir = join(process.cwd(), 'workspace', 'agents');
-  agentRegistry.loadFromDirectory(agentsDir);
+  agentRegistry.loadFromDirectory(NeoHome.agents);
 
   const bridge = new ClaudeBridge();
-  const spawner = new SubAgentSpawner(bridge, '/tmp/neo-agents');
+  const spawner = new SubAgentSpawner(bridge, NeoHome.tmpAgents);
   const orchestrator = new Orchestrator(spawner, agentRegistry, db);
 
   // Skills routes (needs bridge for AI generation)
   const { registerSkillRoutes } = await import('./api/skills-routes.js');
-  registerSkillRoutes(app, skillRegistry, skillsDir, bridge);
+  registerSkillRoutes(app, skillRegistry, NeoHome.skills, bridge);
   console.log(status.ok(`Skills loaded (${skillRegistry.size} skills)`));
 
   app.get('/api/agents/blueprints', (_req, res) => {
@@ -160,9 +165,7 @@ async function main(): Promise<void> {
   const taskRunner = new TaskRunner(taskRepo, broadcast, {
     pollIntervalMs: 5000,
     maxConcurrent: 2,
-    workspaceDir: process.env.NEO_WORKSPACE_PATH
-      ? join(process.cwd(), process.env.NEO_WORKSPACE_PATH)
-      : join(process.cwd(), 'workspace'),
+    workspaceDir: NeoHome.workspace('cli', 'cli'),
     model: process.env.NEO_DEFAULT_MODEL || 'sonnet',
   });
   taskRunner.start();
@@ -174,7 +177,7 @@ async function main(): Promise<void> {
     const agent = new NeoAgent(db, {
       agentName: AGENT_NAME,
       userName: USER_NAME,
-      workspacePath: process.env.NEO_WORKSPACE_PATH || './workspace',
+      workspacePath: NeoHome.workspace('cli', 'cli'),
       defaultModel: (process.env.NEO_DEFAULT_MODEL || 'sonnet') as 'haiku' | 'sonnet' | 'opus',
       gatePhrase: process.env.NEO_GATE_PHRASE || 'do it',
       protectedPaths: (process.env.NEO_PROTECTED_PATHS || '~/.ssh/,~/.gnupg/,.env')
@@ -185,7 +188,7 @@ async function main(): Promise<void> {
       port: PORT,
       wsPort: Number(process.env.NEO_WS_PORT) || 3142,
       wsToken: process.env.NEO_WS_TOKEN || 'change-me',
-      dbPath: process.env.NEO_DB_PATH || join(process.cwd(), 'data', 'neo.db'),
+      dbPath: process.env.NEO_DB_PATH || NeoHome.db,
       personalityIntensity: process.env.NEO_PERSONALITY_INTENSITY || 'full-existential-crisis',
       verbosity: (process.env.NEO_VERBOSITY || 'balanced') as 'concise' | 'balanced' | 'detailed',
       dailyLogCron: process.env.NEO_DAILY_LOG_CRON || '0 23 * * *',
@@ -289,8 +292,7 @@ async function main(): Promise<void> {
     server.close();
     try {
       const { runBackup } = await import('./db/backup.js');
-      const backupDir = join(process.cwd(), 'data', 'backups');
-      const dest = await runBackup(db, backupDir);
+      const dest = await runBackup(db, NeoHome.backups);
       console.log(status.ok(`Backup saved: ${dest}`));
     } catch {
       // Don't block shutdown on backup failure

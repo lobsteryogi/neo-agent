@@ -12,6 +12,7 @@
 import { exec } from 'child_process';
 import type { Express } from 'express';
 import type { ClaudeBridge } from '../core/claude-bridge.js';
+import { NeoHome } from '../core/neo-home.js';
 import type { SchedulerTool } from '../tools/scheduler.js';
 import { stripMarkdownFences } from '../utils/strip-fences.js';
 import { logger } from '../utils/logger.js';
@@ -71,7 +72,7 @@ function makeCronFn(
     job.runCount++;
     broadcast({ type: 'cron:fired', job: { ...job } });
 
-    exec(job.command, { cwd: process.cwd(), timeout: 30_000 }, (err, stdout, stderr) => {
+    exec(job.command, { cwd: NeoHome.root, timeout: 30_000 }, (err, stdout, stderr) => {
       const output = (stdout || stderr || '').trim();
       if (err) {
         log.warn('cron command failed', { name: job.name, error: err.message });
@@ -102,7 +103,7 @@ export function registerCronRoutes(
       log.info('generating cron from prompt', { prompt: prompt.slice(0, 100) });
 
       const result = await bridge.run(`Generate a cron job for: ${prompt}`, {
-        cwd: process.cwd(),
+        cwd: NeoHome.workspace('cli', 'cli'),
         model: 'haiku',
         maxTurns: 1,
         allowedTools: [],

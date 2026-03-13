@@ -1,11 +1,12 @@
 import Database from 'better-sqlite3';
+import { NeoHome } from '../core/neo-home.js';
 import { runMigrations } from './migrations.js';
 
 let db: Database.Database;
 
 export function getDb(dbPath?: string): Database.Database {
   if (!db) {
-    const path = dbPath ?? process.env.NEO_DB_PATH ?? 'neo.db';
+    const path = dbPath ?? process.env.NEO_DB_PATH ?? NeoHome.db;
     db = new Database(path);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');

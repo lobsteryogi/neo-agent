@@ -11,6 +11,7 @@ import type { HealthStatus } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
 import { statSync } from 'fs';
+import { NeoHome } from '../core/neo-home.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { logger } from '../utils/logger.js';
 
@@ -18,7 +19,7 @@ const log = logger('health');
 
 function getDbFileSizeMb(): number {
   try {
-    const dbPath = process.env.NEO_DB_PATH || 'neo.db';
+    const dbPath = process.env.NEO_DB_PATH || NeoHome.db;
     const stats = statSync(dbPath);
     return Math.round((stats.size / 1024 / 1024) * 100) / 100;
   } catch {

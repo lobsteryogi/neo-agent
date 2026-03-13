@@ -10,6 +10,7 @@ import * as clack from '@clack/prompts';
 import type { WizardAnswers } from '@neo-agent/shared';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import { NeoHome } from '../../core/neo-home.js';
 import { color, sleep, status } from '../../utils/terminal.js';
 import {
   generateClaudeSettings,
@@ -24,7 +25,8 @@ export const run: StepFn = async (ctx, meta): Promise<StepResult> => {
   showStepHeader(meta);
 
   const answers = ctx as WizardAnswers;
-  const workspacePath = join(process.cwd(), 'workspace');
+  NeoHome.ensureStructure();
+  const workspacePath = NeoHome.shared;
 
   const spinner = clack.spinner();
 
@@ -57,7 +59,7 @@ export const run: StepFn = async (ctx, meta): Promise<StepResult> => {
   await sleep(400);
 
   const checks = [
-    { label: '.env', ok: existsSync(join(process.cwd(), '.env')) },
+    { label: 'config.env', ok: existsSync(NeoHome.configEnv) },
     { label: 'AGENTS.md', ok: existsSync(join(workspacePath, 'AGENTS.md')) },
     { label: 'SOUL.md', ok: existsSync(join(workspacePath, 'SOUL.md')) },
     { label: 'USER.md', ok: existsSync(join(workspacePath, 'USER.md')) },
@@ -65,13 +67,13 @@ export const run: StepFn = async (ctx, meta): Promise<StepResult> => {
     { label: 'BOOTSTRAP.md', ok: existsSync(join(workspacePath, 'BOOTSTRAP.md')) },
     { label: 'HEARTBEAT.md', ok: existsSync(join(workspacePath, 'HEARTBEAT.md')) },
     { label: 'stories/', ok: existsSync(join(workspacePath, 'stories', '01-who-i-am.md')) },
-    { label: 'skills/', ok: existsSync(join(workspacePath, 'skills')) },
-    { label: 'agents/', ok: existsSync(join(workspacePath, 'agents')) },
+    { label: 'skills/', ok: existsSync(join(NeoHome.skills)) },
+    { label: 'agents/', ok: existsSync(join(NeoHome.agents)) },
     {
       label: '.claude/settings.json',
       ok: existsSync(join(workspacePath, '.claude', 'settings.json')),
     },
-    { label: 'neo.db', ok: existsSync(join(process.cwd(), 'neo.db')) },
+    { label: 'neo.db', ok: existsSync(NeoHome.db) },
   ];
 
   const allOk = checks.every((c) => c.ok);

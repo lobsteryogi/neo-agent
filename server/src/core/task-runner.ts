@@ -9,6 +9,7 @@
 
 import type { KanbanTask, SDKStreamMessage } from '@neo-agent/shared';
 import { ClaudeBridge } from './claude-bridge.js';
+import { NeoHome } from './neo-home.js';
 import type { TaskRepo } from '../db/task-repo.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
@@ -164,7 +165,7 @@ export class TaskRunner {
         ? `Task: ${task.title}\n\n${task.description}`
         : `Task: ${task.title}`;
 
-      const cwd = this.config.workspaceDir ?? process.cwd();
+      const cwd = this.config.workspaceDir ?? NeoHome.workspace('cli', 'cli');
       const result = await bridge.run(prompt, {
         cwd,
         model: (task.model ?? this.config.model ?? 'sonnet') as 'sonnet' | 'opus' | 'haiku',
@@ -370,7 +371,7 @@ export class TaskRunner {
         .filter(Boolean)
         .join('\n');
 
-      const cwd = this.config.workspaceDir ?? process.cwd();
+      const cwd = this.config.workspaceDir ?? NeoHome.workspace('cli', 'cli');
       const result = await bridge.run(reviewPrompt, {
         cwd,
         model: (task.model ?? this.config.model ?? 'sonnet') as 'sonnet' | 'opus' | 'haiku',

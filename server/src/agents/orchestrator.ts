@@ -24,6 +24,7 @@ import type {
 } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
+import { NeoHome } from '../core/neo-home.js';
 import { safeJsonParse } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import type { AgentRegistry } from './registry.js';
@@ -35,10 +36,10 @@ const DEFAULT_CONFIG: AgentConfig = {
   maxConcurrentAgents: 3,
   defaultSubAgentTimeout: 120_000,
   defaultSubAgentMaxTurns: 5,
-  agentWorkspaceDir: '/tmp/neo-agents',
+  agentWorkspaceDir: NeoHome.tmpAgents,
   autoDecompose: true,
   decompositionThreshold: 2,
-  blueprintsDir: 'workspace/agents',
+  blueprintsDir: NeoHome.agents,
 };
 
 export class Orchestrator {

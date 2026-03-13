@@ -16,6 +16,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { Express } from 'express';
 import type { ClaudeBridge } from '../core/claude-bridge.js';
+import { NeoHome } from '../core/neo-home.js';
 import type { SkillRegistry } from '../skills/index.js';
 import { parseFrontmatter } from '../utils/frontmatter.js';
 import { stripMarkdownFences } from '../utils/strip-fences.js';
@@ -246,7 +247,7 @@ async function fetchUrlText(url: string): Promise<string> {
 
 async function generateSkillMd(bridge: ClaudeBridge, userMessage: string): Promise<string> {
   const result = await bridge.run(userMessage, {
-    cwd: process.cwd(),
+    cwd: NeoHome.workspace('cli', 'cli'),
     model: 'haiku',
     maxTurns: 1,
     allowedTools: [],
@@ -271,7 +272,7 @@ export function registerSkillRoutes(
   app.get(
     '/api/skills',
     wrapRoute((_req, res) => {
-      const claudeSkillsDir = join(process.env.HOME ?? '/root', '.claude', 'skills');
+      const claudeSkillsDir = NeoHome.claudeSkills;
       const skills = skillRegistry.getAll().map(({ name, description, tags, path }) => ({
         name,
         description,
@@ -415,7 +416,7 @@ export function registerSkillRoutes(
         return res.status(409).json({ error: `Skill "${safeName}" already exists` });
       }
 
-      const claudeSkillsDir = join(process.env.HOME ?? '/root', '.claude', 'skills');
+      const claudeSkillsDir = NeoHome.claudeSkills;
       const targetDir = destination === 'global' ? claudeSkillsDir : skillsDir;
       const skillDir = join(targetDir, safeName);
       mkdirSync(skillDir, { recursive: true });

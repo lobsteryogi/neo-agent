@@ -17,8 +17,8 @@
 
 import dgram from 'dgram';
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { dirname } from 'path';
+import { NeoHome } from '../core/neo-home.js';
 import { ensureDir } from './fs.js';
 
 // ─── ANSI Helpers ────────────────────────────────────────────────
@@ -138,7 +138,7 @@ interface LoggerConfig {
   timestamps: boolean;
 }
 
-const DEFAULT_LOG_FILE = join(homedir(), '.neo-agent', 'logs', 'neo.log');
+const DEFAULT_LOG_FILE = NeoHome.logFile;
 const MAX_LOG_FILE_BYTES = 1_000_000; // 1 MB — rotate when exceeded
 
 const config: LoggerConfig = {

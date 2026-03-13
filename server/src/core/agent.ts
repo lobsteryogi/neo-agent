@@ -18,6 +18,7 @@ import type {
 } from '@neo-agent/shared';
 import type Database from 'better-sqlite3';
 import { join } from 'path';
+import { NeoHome } from './neo-home.js';
 import { Orchestrator } from '../agents/orchestrator.js';
 import { AgentRegistry } from '../agents/registry.js';
 import { SubAgentSpawner } from '../agents/spawner.js';
@@ -101,13 +102,13 @@ export class NeoAgent {
 
     // Phase 6 — Kung Fu: Skill calling & learning
     this.skillRegistry = new SkillRegistry();
-    this.skillRegistry.loadFromDirectory(join(config.workspacePath, 'skills'));
+    this.skillRegistry.loadFromDirectory(NeoHome.skills);
     this.skillMatcher = new SkillMatcher(this.skillRegistry);
 
     // Phase 7 — The Ones: Sub-agent orchestration
     this.agentRegistry = new AgentRegistry();
-    this.agentRegistry.loadFromDirectory(join(config.workspacePath, 'agents'));
-    const spawner = new SubAgentSpawner(this.bridge, '/tmp/neo-agents');
+    this.agentRegistry.loadFromDirectory(NeoHome.agents);
+    const spawner = new SubAgentSpawner(this.bridge, NeoHome.tmpAgents);
     this.orchestrator = new Orchestrator(spawner, this.agentRegistry, db);
 
     // Memory
@@ -402,8 +403,12 @@ export class NeoAgent {
     // Neo-dev mode is per-user and disabled in groups for security
     const isNeoDev = isGroup ? false : (this.neoDevModes.get(uKey) ?? false);
 
+    // Resolve per-context workspace: groups use channelId, DMs use userId
+    const workspaceContextId = isGroup ? `group:${message.channelId}` : message.userId;
+    const workspaceCwd = NeoHome.workspace(message.channel, workspaceContextId);
+
     const runOpts: any = {
-      cwd: isNeoDev ? process.cwd().replace(/\/server$/, '') : this.config.workspacePath,
+      cwd: isNeoDev ? process.cwd().replace(/\/server$/, '') : workspaceCwd,
       model: route.selectedModel,
       permissionMode: isNeoDev ? 'dontAsk' : this.config.permissionMode,
       allowedTools: route.allowedTools ?? [
@@ -662,7 +667,7 @@ ${conversationText}
 
     try {
       const result = await this.bridge.run(compactPrompt, {
-        cwd: this.config.workspacePath,
+        cwd: NeoHome.workspace('cli', 'cli'),
         model: 'sonnet',
         maxTurns: 1,
         timeoutMs: 60_000,
