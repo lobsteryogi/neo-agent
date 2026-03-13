@@ -77,6 +77,7 @@ export const COMMANDS: CommandDef[] = [
     channels: ['cli', 'telegram'],
   },
   { command: '/brag', description: 'Show off what Neo can do', channels: ['cli', 'telegram'] },
+  { command: '/migrate', description: 'Migrate old workspace to ~/.neo-agent/', channels: ['cli'] },
   { command: '/help', description: 'Show available commands', channels: ['cli', 'telegram'] },
   { command: '/exit', description: 'Disconnect from the Matrix', channels: ['cli'] },
 ];

@@ -570,6 +570,27 @@ describe('handleCommand', () => {
     expect(deps.rl.prompt).toHaveBeenCalled();
   });
 
+  // ─── /migrate ──────────────────────────────────────────────────
+
+  it('/migrate returns a promise that resolves to true', async () => {
+    vi.mock('../../src/core/neo-home.js', () => ({
+      NeoHome: {
+        root: '/tmp/test-neo-home',
+        db: '/tmp/test-neo-home/neo.db',
+        ensureStructure: vi.fn(),
+      },
+    }));
+    vi.mock('../../src/core/neo-home-migrate.js', () => ({
+      scanOldLayout: vi.fn(() => []),
+      runMigration: vi.fn(() => ({ items: [], alreadyMigrated: false })),
+    }));
+    const result = handleCommand('/migrate', deps);
+    expect(result).toBeInstanceOf(Promise);
+    const resolved = await result;
+    expect(resolved).toBe(true);
+    expect(deps.rl.prompt).toHaveBeenCalled();
+  });
+
   // ─── Command return values ──────────────────────────────────────
 
   it('all recognized commands return true (synchronous)', () => {

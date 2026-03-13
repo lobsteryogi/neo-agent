@@ -18,50 +18,51 @@ import { logger } from '../utils/logger.js';
 
 const log = logger('migration');
 
-/**
- * Check for old layout and migrate to ~/.neo-agent/ if needed.
- * Call this once at startup before DB init.
- */
-export function migrateToNeoHome(): void {
-  // Already has a DB in NeoHome — skip migration
-  if (existsSync(NeoHome.db)) return;
+// ─── Types ───────────────────────────────────────────────────
 
-  NeoHome.ensureStructure();
+export interface MigrationItem {
+  label: string;
+  from: string;
+  to: string;
+  status: 'copied' | 'skipped' | 'not-found';
+}
 
-  let migrated = false;
+export interface MigrationReport {
+  items: MigrationItem[];
+  alreadyMigrated: boolean;
+}
 
-  // ─── DB Migration ────────────────────────────────────────
-  const oldDbPaths = [join(process.cwd(), 'data', 'neo.db'), join(process.cwd(), 'neo.db')];
-  for (const oldDb of oldDbPaths) {
-    if (existsSync(oldDb)) {
-      copyFileSync(oldDb, NeoHome.db);
-      // Also copy WAL/SHM if they exist
-      for (const suffix of ['-wal', '-shm']) {
-        if (existsSync(oldDb + suffix)) {
-          copyFileSync(oldDb + suffix, NeoHome.db + suffix);
-        }
-      }
-      log.info('Migrated database', { from: oldDb, to: NeoHome.db });
-      migrated = true;
+// ─── Discovery ───────────────────────────────────────────────
+
+/** Scan for old layout files and report what would be migrated. */
+export function scanOldLayout(): MigrationItem[] {
+  const items: MigrationItem[] = [];
+
+  // DB
+  for (const [label, oldPath] of [
+    ['neo.db', join(process.cwd(), 'data', 'neo.db')],
+    ['neo.db', join(process.cwd(), 'neo.db')],
+  ] as const) {
+    if (existsSync(oldPath)) {
+      items.push({ label, from: oldPath, to: NeoHome.db, status: 'not-found' });
       break;
     }
   }
 
-  // ─── Config Migration ────────────────────────────────────
-  const oldEnvPaths = [join(process.cwd(), 'data', '.env'), join(process.cwd(), '.env')];
-  for (const oldEnv of oldEnvPaths) {
-    if (existsSync(oldEnv) && !existsSync(NeoHome.configEnv)) {
-      copyFileSync(oldEnv, NeoHome.configEnv);
-      log.info('Migrated config', { from: oldEnv, to: NeoHome.configEnv });
-      migrated = true;
+  // .env
+  for (const [label, oldPath] of [
+    ['.env', join(process.cwd(), 'data', '.env')],
+    ['.env', join(process.cwd(), '.env')],
+  ] as const) {
+    if (existsSync(oldPath)) {
+      items.push({ label, from: oldPath, to: NeoHome.configEnv, status: 'not-found' });
       break;
     }
   }
 
-  // ─── Workspace → shared + workspaces/cli ─────────────────
+  // Workspace files
   const oldWorkspace = join(process.cwd(), 'workspace');
   if (existsSync(oldWorkspace)) {
-    // Shared files go to ~/.neo-agent/shared/
     const sharedFiles = [
       'SOUL.md',
       'USER.md',
@@ -72,53 +73,110 @@ export function migrateToNeoHome(): void {
     ];
     for (const file of sharedFiles) {
       const src = join(oldWorkspace, file);
-      const dest = join(NeoHome.shared, file);
-      if (existsSync(src) && !existsSync(dest)) {
-        copyFileSync(src, dest);
+      if (existsSync(src)) {
+        items.push({ label: file, from: src, to: join(NeoHome.shared, file), status: 'not-found' });
       }
     }
 
-    // Shared directories go to ~/.neo-agent/shared/
-    const sharedDirs = ['skills', 'agents', 'stories'];
-    for (const dir of sharedDirs) {
+    // Shared directories
+    for (const dir of ['skills', 'agents', 'stories']) {
       const src = join(oldWorkspace, dir);
-      const dest = join(NeoHome.shared, dir);
       if (existsSync(src) && statSync(src).isDirectory()) {
-        copyDirContents(src, dest);
+        items.push({
+          label: `${dir}/`,
+          from: src,
+          to: join(NeoHome.shared, dir),
+          status: 'not-found',
+        });
       }
     }
 
-    // .claude directory
+    // .claude
     const oldClaude = join(oldWorkspace, '.claude');
-    const newClaude = join(NeoHome.shared, '.claude');
     if (existsSync(oldClaude) && statSync(oldClaude).isDirectory()) {
-      copyDirContents(oldClaude, newClaude);
+      items.push({
+        label: '.claude/',
+        from: oldClaude,
+        to: join(NeoHome.shared, '.claude'),
+        status: 'not-found',
+      });
     }
-
-    log.info('Migrated workspace to shared', { from: oldWorkspace, to: NeoHome.shared });
-    migrated = true;
   }
 
-  // ─── Backups ─────────────────────────────────────────────
+  // Backups
   const oldBackups = join(process.cwd(), 'data', 'backups');
   if (existsSync(oldBackups) && statSync(oldBackups).isDirectory()) {
-    copyDirContents(oldBackups, NeoHome.backups);
-    log.info('Migrated backups', { from: oldBackups, to: NeoHome.backups });
-    migrated = true;
+    items.push({ label: 'backups/', from: oldBackups, to: NeoHome.backups, status: 'not-found' });
   }
 
-  if (migrated) {
-    log.info('Migration complete — files now live in ~/.neo-agent/');
-  }
+  return items;
 }
+
+// ─── Execute Migration ───────────────────────────────────────
+
+/** Run the migration. Returns a report of what was done. */
+export function runMigration(opts: { force?: boolean } = {}): MigrationReport {
+  const alreadyMigrated = existsSync(NeoHome.db);
+
+  if (alreadyMigrated && !opts.force) {
+    return { items: [], alreadyMigrated: true };
+  }
+
+  NeoHome.ensureStructure();
+
+  const items = scanOldLayout();
+
+  for (const item of items) {
+    if (existsSync(item.to) && !opts.force) {
+      item.status = 'skipped';
+      continue;
+    }
+
+    try {
+      const srcStat = statSync(item.from);
+      if (srcStat.isDirectory()) {
+        copyDirContents(item.from, item.to);
+      } else {
+        ensureDir(join(item.to, '..').replace(/\/\.\.$/, ''));
+        copyFileSync(item.from, item.to);
+        // DB: also copy WAL/SHM
+        if (item.label === 'neo.db') {
+          for (const suffix of ['-wal', '-shm']) {
+            if (existsSync(item.from + suffix)) {
+              copyFileSync(item.from + suffix, item.to + suffix);
+            }
+          }
+        }
+      }
+      item.status = 'copied';
+      log.info(`Migrated ${item.label}`, { from: item.from, to: item.to });
+    } catch {
+      item.status = 'skipped';
+    }
+  }
+
+  const copied = items.filter((i) => i.status === 'copied').length;
+  if (copied > 0) {
+    log.info('Migration complete', { copied, total: items.length });
+  }
+
+  return { items, alreadyMigrated: false };
+}
+
+/**
+ * Auto-migration for server startup — silent, skips if already migrated.
+ */
+export function migrateToNeoHome(): void {
+  runMigration();
+}
+
+// ─── Helpers ─────────────────────────────────────────────────
 
 function copyDirContents(src: string, dest: string): void {
   ensureDir(dest);
   try {
     cpSync(src, dest, { recursive: true, force: false });
   } catch {
-    // cpSync with force:false won't overwrite — errors on existing files are expected
-    // Fall back to manual copy for older Node versions
     try {
       const entries = readdirSync(src, { withFileTypes: true });
       for (const entry of entries) {

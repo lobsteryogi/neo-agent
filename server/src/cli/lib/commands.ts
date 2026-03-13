@@ -471,6 +471,76 @@ export function handleCommand(input: string, deps: CommandDeps): boolean | Promi
     return true;
   }
 
+  // ─── /migrate ──────────────────────────────────────────
+  if (input === '/migrate' || input === '/migrate --force') {
+    const force = input.includes('--force');
+    return (async () => {
+      const { NeoHome } = await import('../../core/neo-home.js');
+      const { scanOldLayout, runMigration } = await import('../../core/neo-home-migrate.js');
+
+      console.log();
+      console.log(`  ${gradient('Migrate to ~/.neo-agent/', [0, 255, 65], [0, 200, 255])}`);
+      console.log(color.dim(`  Target: ${NeoHome.root}`));
+      console.log();
+
+      // Scan first
+      const items = scanOldLayout();
+      if (items.length === 0) {
+        console.log(statusIcon.info('No old layout files found to migrate.'));
+        console.log(color.dim('    Already using ~/.neo-agent/ or no ./workspace / ./data found.'));
+        console.log();
+        rl.prompt();
+        return true;
+      }
+
+      // Show what will be migrated
+      console.log(color.dim('  Found:'));
+      for (const item of items) {
+        console.log(
+          `    ${color.green('▸')} ${color.neonCyan(item.label)} ${color.dim('→')} ${color.dim(item.to)}`,
+        );
+      }
+      console.log();
+
+      // Run migration
+      const report = runMigration({ force });
+
+      if (report.alreadyMigrated && !force) {
+        console.log(
+          statusIcon.info(
+            `${NeoHome.db} already exists. Use ${color.neonCyan('/migrate --force')} to overwrite.`,
+          ),
+        );
+      } else {
+        const copied = report.items.filter((i) => i.status === 'copied');
+        const skipped = report.items.filter((i) => i.status === 'skipped');
+
+        for (const item of copied) {
+          console.log(statusIcon.ok(`${item.label}`));
+        }
+        for (const item of skipped) {
+          console.log(
+            `  ${color.dim('–')} ${color.dim(item.label)} ${color.dim('(already exists)')}`,
+          );
+        }
+
+        console.log();
+        if (copied.length > 0) {
+          console.log(
+            statusIcon.ok(
+              `Migrated ${copied.length} item(s) to ${color.neonCyan('~/.neo-agent/')}`,
+            ),
+          );
+        } else {
+          console.log(statusIcon.info('Nothing new to migrate — all files already in place.'));
+        }
+      }
+      console.log();
+      rl.prompt();
+      return true;
+    })();
+  }
+
   // ─── /brag ────────────────────────────────────────────
   if (input === '/brag') {
     console.log();
