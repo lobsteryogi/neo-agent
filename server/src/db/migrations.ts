@@ -180,13 +180,6 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
-    version: 5,
-    name: 'session_name',
-    up: `
-      ALTER TABLE chat_sessions ADD COLUMN name TEXT;
-    `,
-  },
-  {
     version: 4,
     name: 'kanban_tasks',
     up: `
@@ -214,19 +207,29 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    version: 5,
+    name: 'session_name',
+    up: `
+      ALTER TABLE chat_sessions ADD COLUMN name TEXT;
+    `,
+  },
+  {
+    version: 6,
+    name: 'extended_session_state',
+    up: `
+      ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT;
+      ALTER TABLE sessions ADD COLUMN last_model_tier TEXT;
+      ALTER TABLE sessions ADD COLUMN turns INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN total_input_tokens INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN total_output_tokens INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN total_cost REAL NOT NULL DEFAULT 0;
+    `,
+  },
+  {
     version: 7,
     name: 'task_agent_result',
     up: `
       ALTER TABLE tasks ADD COLUMN agent_result TEXT;
-    `,
-  },
-  {
-    version: 9,
-    name: 'task_extra_fields',
-    up: `
-      ALTER TABLE tasks ADD COLUMN model TEXT;
-      ALTER TABLE tasks ADD COLUMN notes TEXT NOT NULL DEFAULT '';
-      ALTER TABLE tasks ADD COLUMN started_at INTEGER;
     `,
   },
   {
@@ -261,15 +264,12 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
-    version: 6,
-    name: 'extended_session_state',
+    version: 9,
+    name: 'task_extra_fields',
     up: `
-      ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT;
-      ALTER TABLE sessions ADD COLUMN last_model_tier TEXT;
-      ALTER TABLE sessions ADD COLUMN turns INTEGER NOT NULL DEFAULT 0;
-      ALTER TABLE sessions ADD COLUMN total_input_tokens INTEGER NOT NULL DEFAULT 0;
-      ALTER TABLE sessions ADD COLUMN total_output_tokens INTEGER NOT NULL DEFAULT 0;
-      ALTER TABLE sessions ADD COLUMN total_cost REAL NOT NULL DEFAULT 0;
+      ALTER TABLE tasks ADD COLUMN model TEXT;
+      ALTER TABLE tasks ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+      ALTER TABLE tasks ADD COLUMN started_at INTEGER;
     `,
   },
   {

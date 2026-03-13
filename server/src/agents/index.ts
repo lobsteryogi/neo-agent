@@ -4,7 +4,6 @@
  * "He is The One."
  */
 
-export { AgentMessageBus } from './message-bus.js';
 export { Orchestrator } from './orchestrator.js';
 export { AgentRegistry } from './registry.js';
 export { SubAgentSpawner } from './spawner.js';

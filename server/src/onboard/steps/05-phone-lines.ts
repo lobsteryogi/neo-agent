@@ -15,13 +15,6 @@ import type { StepFn, StepResult } from '../types.js';
 export const run: StepFn = async (_ctx, meta): Promise<StepResult> => {
   showStepHeader(meta);
 
-  const composioApiKey = await clack.text({
-    message: '🔧 Composio API key (for tool integrations):',
-    placeholder: 'Skip with Enter',
-    defaultValue: '',
-  });
-  if (clack.isCancel(composioApiKey)) process.exit(0);
-
   const telegramBotToken = await clack.text({
     message: '📱 Telegram bot token:',
     placeholder: 'Skip with Enter',
@@ -84,7 +77,6 @@ export const run: StepFn = async (_ctx, meta): Promise<StepResult> => {
 
   return {
     answers: {
-      composioApiKey: (composioApiKey as string) || undefined,
       telegramBotToken: (telegramBotToken as string) || undefined,
       tailscaleEnabled,
     },

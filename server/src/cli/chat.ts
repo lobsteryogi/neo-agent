@@ -245,9 +245,7 @@ async function processInput(input: string): Promise<void> {
     // Dynamic timeout
     const timeoutMs = calculateTimeoutMs(classification.complexity);
 
-    const permMode = neoDevMode
-      ? 'bypassPermissions'
-      : process.env.NEO_PERMISSION_MODE || 'default';
+    const permMode = neoDevMode ? 'dontAsk' : process.env.NEO_PERMISSION_MODE || 'default';
     const effectiveCwd = neoDevMode ? NEO_AGENT_ROOT : WORKSPACE;
 
     // Inject compacted context from /compact into system prompt
@@ -269,7 +267,6 @@ async function processInput(input: string): Promise<void> {
       timeoutMs,
       systemPrompt: effectiveSystemPrompt,
       permissionMode: permMode,
-      allowDangerouslySkipPermissions: neoDevMode || permMode === 'bypassPermissions',
       allowedTools: [
         'Read',
         'Write',

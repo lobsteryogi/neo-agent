@@ -24,8 +24,6 @@ export class ClaudeBridge extends EventEmitter {
       maxTurns: opts.maxTurns ?? 10,
       timeoutMs,
       cwd: opts.cwd,
-      permissionMode: opts.permissionMode,
-      allowedTools: opts.allowedTools,
       resumeSessionId: opts.resumeSessionId ?? null,
       promptLength: prompt.length,
     });
@@ -56,7 +54,6 @@ export class ClaudeBridge extends EventEmitter {
           systemPrompt: opts.systemPrompt,
           allowedTools: opts.allowedTools,
           permissionMode: opts.permissionMode,
-          allowDangerouslySkipPermissions: opts.allowDangerouslySkipPermissions,
           env,
         } as Record<string, unknown>,
       };
@@ -104,13 +101,11 @@ export class ClaudeBridge extends EventEmitter {
             turnCount++;
             const content = (message as SDKStreamMessage).message?.content;
             const model = (message as SDKStreamMessage).message?.model;
-            if (model) log.debug('Assistant turn', { turn: turnCount, model });
 
             if (Array.isArray(content)) {
               for (const block of content) {
                 if (block.type === 'text' && block.text) {
                   resultContent += block.text;
-                  log.debug('Text block', { length: block.text.length, turn: turnCount });
                 }
                 if (block.type === 'tool_use' && block.name) {
                   toolCallCount++;
@@ -124,30 +119,29 @@ export class ClaudeBridge extends EventEmitter {
                     (input?.description as string)?.slice(0, 60) ??
                     (input?.command as string)?.slice(0, 80) ??
                     undefined;
-                  log.debug('Tool call', {
+                  log.info('Tool', {
                     tool: block.name,
-                    toolCallNum: toolCallCount,
                     ...(target ? { target } : {}),
-                    ...(block.id ? { toolUseId: block.id } : {}),
                   });
                 }
               }
             }
+            if (model) log.debug('Turn', { turn: turnCount, model });
           }
 
           if ((message as any).type === 'tool_result') {
             const msg = message as any;
-            log.debug('Tool result', {
-              toolUseId: msg.tool_use_id ?? msg.id ?? null,
-              isError: msg.is_error ?? false,
-              contentLength: typeof msg.content === 'string' ? msg.content.length : null,
-            });
+            if (msg.is_error) {
+              log.warn('Tool error', {
+                toolUseId: msg.tool_use_id ?? msg.id ?? null,
+                isError: true,
+              });
+            }
           }
 
           if (message.type === 'result') {
             resultContent = (message as SDKStreamMessage).result ?? resultContent;
             const usage = (message as SDKStreamMessage).modelUsage;
-            const usageSummary: Record<string, unknown> = {};
             if (usage) {
               for (const [model, u] of Object.entries(usage) as [string, any][]) {
                 const input = u.inputTokens ?? u.input_tokens ?? 0;
@@ -156,15 +150,14 @@ export class ClaudeBridge extends EventEmitter {
                 totalInputTokens += input;
                 totalOutputTokens += output;
                 totalCostUsd += cost;
-                usageSummary[model] = { input, output, cost };
               }
             }
-            log.debug('Result received', {
-              contentLength: resultContent.length,
+            log.info('Result', {
               turns: turnCount,
               toolCalls: toolCallCount,
-              totalMessages: messages.length,
-              usage: usageSummary,
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              costUsd: totalCostUsd,
             });
           }
 
@@ -177,12 +170,7 @@ export class ClaudeBridge extends EventEmitter {
 
       await Promise.race([iterate(), abortPromise]);
 
-      log.debug('Bridge.run success', {
-        turns: turnCount,
-        toolCalls: toolCallCount,
-        responseLength: resultContent.length,
-        totalMessages: messages.length,
-      });
+      log.debug('Bridge.run success', { turns: turnCount, toolCalls: toolCallCount });
 
       return {
         success: true,

@@ -285,21 +285,22 @@ export class NeoAgent {
     const uKey = this.userKey(message);
     const senderName = (message.metadata?.senderName as string) ?? undefined;
 
-    log.debug('Pipeline start', {
+    log.info('Incoming', {
       channel: message.channel,
-      userId: message.userId,
-      contentLength: message.content.length,
-      isGroup,
       senderName,
+      content: message.content.slice(0, 200),
+      isGroup,
     });
 
     // 0. Media processing (voice → text, image → analysis, document → text)
     const enriched = this.mediaProcessor ? await this.mediaProcessor.process(message) : message;
-    if (this.mediaProcessor) log.debug('Media processed', { hasMedia: enriched !== message });
+    if (this.mediaProcessor && enriched !== message)
+      log.info('Media processed', { hasMedia: true });
 
     // 1. Guardrails
     const sanitized = await this.guardrails.process(enriched);
-    log.debug('Guardrails passed', { modified: sanitized.content !== enriched.content });
+    if (sanitized.content !== enriched.content)
+      log.info('Guardrails modified input', { modified: true });
 
     // 2. Session — group chats share one session keyed by channelId
     const sessionUserId = isGroup ? `group:${message.channelId}` : message.userId;
@@ -308,7 +309,7 @@ export class NeoAgent {
       sessionUserId,
       message.channel,
     );
-    log.debug('Session resolved', { sessionId: session.id, totalTokens: session.totalTokens ?? 0 });
+    log.debug('Session', { sessionId: session.id, totalTokens: session.totalTokens ?? 0 });
 
     // 3. Context assembly — system prompt + compacted context + debug injection
     let systemPrompt = this.buildSystemPrompt(session, message);
@@ -335,27 +336,22 @@ export class NeoAgent {
       hasActiveTools: false,
     };
     const classification = this.classifier.classify(sanitized.content, context);
-    log.debug('Task classified', {
+    const route = this.router.selectModel(classification, this.config.routingProfile);
+    log.info('Routed', {
+      model: route.selectedModel,
       complexity: classification.complexity,
       tokenEstimate: classification.tokenEstimate,
-    });
-
-    const route = this.router.selectModel(classification, this.config.routingProfile);
-    log.debug('Route selected', {
-      model: route.selectedModel,
-      score: route.score,
       maxTurns: route.maxTurns,
     });
 
     // 4a. One-shot model override (/model command) — per-user in groups
     const override = this.modelOverrides.get(uKey);
     if (override) {
-      log.debug('Model override applied', { from: route.selectedModel, to: override });
+      log.info('Model override', { from: route.selectedModel, to: override });
       route.selectedModel = override;
       this.modelOverrides.delete(uKey);
     } else if (isShortFollowup(sanitized.content) && session.lastModelTier) {
-      // Short followup model reuse
-      log.debug('Short followup, reusing model', { model: session.lastModelTier });
+      log.info('Short followup, reusing model', { model: session.lastModelTier });
       route.selectedModel = session.lastModelTier;
     }
 
@@ -392,7 +388,7 @@ export class NeoAgent {
     });
 
     if (gateResult.blocked) {
-      log.debug('Gate blocked', { reason: gateResult.reason });
+      log.warn('Gate blocked', { reason: gateResult.reason });
       this.harness.historian.logGateBlock(session.id, gateResult);
       return {
         content: gateResult.neoQuip ?? gateResult.reason ?? 'Blocked by gate.',
@@ -400,7 +396,6 @@ export class NeoAgent {
         gateBlocked: gateResult,
       };
     }
-    log.debug('Gates passed');
 
     // 6. Execute via Claude Bridge
     const timeoutMs = calculateTimeoutMs(classification.complexity);
@@ -410,8 +405,7 @@ export class NeoAgent {
     const runOpts: any = {
       cwd: isNeoDev ? process.cwd().replace(/\/server$/, '') : this.config.workspacePath,
       model: route.selectedModel,
-      permissionMode: isNeoDev ? 'bypassPermissions' : this.config.permissionMode,
-      allowDangerouslySkipPermissions: isNeoDev,
+      permissionMode: isNeoDev ? 'dontAsk' : this.config.permissionMode,
       allowedTools: route.allowedTools ?? [
         'Read',
         'Write',
@@ -431,20 +425,22 @@ export class NeoAgent {
     // Session resume via SDK session ID
     if (session.sdkSessionId) {
       runOpts.resumeSessionId = session.sdkSessionId;
-      log.debug('Resuming SDK session', { sdkSessionId: session.sdkSessionId });
+      log.debug('Resuming session', { sdkSessionId: session.sdkSessionId });
     }
 
-    log.debug('Executing bridge', { model: route.selectedModel, maxTurns: route.maxTurns });
+    log.info('Bridge call', {
+      model: route.selectedModel,
+      maxTurns: route.maxTurns,
+      resume: !!session.sdkSessionId,
+    });
     let response = await this.bridge.run(sanitized.content, runOpts);
-    log.debug('Bridge result', { success: response.success });
 
     // If resume failed, retry as fresh conversation
     if (!response.success && runOpts.resumeSessionId) {
-      log.debug('Resume failed, retrying as fresh conversation');
+      log.warn('Resume failed, retrying fresh');
       delete runOpts.resumeSessionId;
       this.sessions.updateExtendedState(session.id, { sdkSessionId: undefined });
       response = await this.bridge.run(sanitized.content, runOpts);
-      log.debug('Fresh retry result', { success: response.success });
     }
 
     // Auto-retry on timeout
@@ -454,7 +450,7 @@ export class NeoAgent {
         (response.message ?? '').toLowerCase().includes('timeout') ||
         (response.error ?? '').includes('ABORT_SIGNAL'));
     if (isTimeout) {
-      log.debug('Timeout detected, auto-retrying', { originalMaxTurns: runOpts.maxTurns });
+      log.warn('Timeout, auto-retrying', { maxTurns: runOpts.maxTurns });
       const retryOpts = {
         ...runOpts,
         maxTurns: Math.max(1, Math.ceil((runOpts.maxTurns ?? 10) / 2)),
@@ -462,7 +458,6 @@ export class NeoAgent {
       };
       delete retryOpts.resumeSessionId;
       response = await this.bridge.run(sanitized.content, retryOpts);
-      log.debug('Auto-retry result', { success: response.success });
     }
 
     // Capture SDK session ID from response messages
@@ -470,7 +465,6 @@ export class NeoAgent {
 
     // 7. Harness
     const validated = await this.harness.process(response, session);
-    log.debug('Harness validated', { tokensUsed: validated.tokensUsed });
 
     // 8. Memory — update session state, record transcript, extract memories
     const bridgeData = validated.data as
@@ -515,7 +509,7 @@ export class NeoAgent {
 
     // Auto-compact check
     this.autoCompactIfNeeded(session, message.sessionKey, newTurns).catch((err) =>
-      log.debug('Auto-compact failed', { error: String(err) }),
+      log.warn('Auto-compact failed', { error: String(err) }),
     );
 
     // 9. Deliver
@@ -526,10 +520,12 @@ export class NeoAgent {
       );
     }
 
-    log.debug('Pipeline complete', {
+    log.info('Done', {
       model: route.selectedModel,
-      tokensUsed: outputTokens,
+      success: response.success,
       turns: newTurns,
+      tokensUsed: outputTokens,
+      costUsd,
     });
     return {
       content: responseContent,
@@ -598,10 +594,10 @@ export class NeoAgent {
         this.longTermMemory.store(entry);
       }
       if (extracted.length > 0) {
-        log.debug('Memories extracted', { count: extracted.length, senderName });
+        log.info('Memories extracted', { count: extracted.length, senderName });
       }
     } catch (err) {
-      log.debug('Memory extraction failed', { error: (err as Error).message });
+      log.warn('Memory extraction failed', { error: (err as Error).message });
     }
   }
 
@@ -619,7 +615,7 @@ export class NeoAgent {
     const keepRecent = 20;
     if (history.length <= keepRecent) return;
 
-    log.debug('Auto-compact triggered', { turns, messageCount: history.length });
+    log.info('Auto-compact triggered', { turns, messageCount: history.length });
 
     const olderMessages = history.slice(0, -keepRecent);
     const existing = this.compactedContexts.get(sessionKey);
@@ -675,7 +671,7 @@ ${conversationText}
       });
 
       if (!result.success || !result.data) {
-        log.debug('Auto-compact failed', { error: result.error });
+        log.warn('Auto-compact failed', { error: result.error });
         return;
       }
 
@@ -696,12 +692,12 @@ ${conversationText}
       // Break SDK session to start fresh with compacted context
       this.sessions.updateExtendedState(session.id, { sdkSessionId: undefined });
 
-      log.debug('Auto-compact done', {
+      log.info('Auto-compact done', {
         olderSummarized: olderMessages.length,
         recentKept: keepRecent,
       });
     } catch (err) {
-      log.debug('Auto-compact error', { error: String(err) });
+      log.warn('Auto-compact error', { error: String(err) });
     }
   }
 

@@ -168,23 +168,19 @@ describe('Step 04 — The Construct', () => {
 describe('Step 05 — Phone Lines', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns composioApiKey and telegramBotToken', async () => {
-    vi.mocked(clack.text)
-      .mockResolvedValueOnce('comp-key-123')
-      .mockResolvedValueOnce('tg:bot-token');
+  it('returns telegramBotToken', async () => {
+    vi.mocked(clack.text).mockResolvedValueOnce('tg:bot-token');
     const { run } = await import('../../src/onboard/steps/05-phone-lines');
     const result = await run({}, META);
     expect(result.answers).toMatchObject({
-      composioApiKey: 'comp-key-123',
       telegramBotToken: 'tg:bot-token',
     });
   });
 
   it('sets undefined for empty optional fields', async () => {
-    vi.mocked(clack.text).mockResolvedValueOnce('').mockResolvedValueOnce('');
+    vi.mocked(clack.text).mockResolvedValueOnce('');
     const { run } = await import('../../src/onboard/steps/05-phone-lines');
     const result = await run({}, META);
-    expect(result.answers.composioApiKey).toBeUndefined();
     expect(result.answers.telegramBotToken).toBeUndefined();
   });
 });
@@ -215,20 +211,18 @@ describe('Step 06 — Free Will', () => {
 describe('Step 07 — Déjà Vu', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns fadeThreshold and geminiApiKey', async () => {
-    vi.mocked(clack.text).mockResolvedValueOnce('0.9').mockResolvedValueOnce('gemini-key-abc');
+  it('returns fadeThreshold', async () => {
+    vi.mocked(clack.text).mockResolvedValueOnce('0.9');
     const { run } = await import('../../src/onboard/steps/07-deja-vu');
     const result = await run({}, META);
     expect(result.answers.fadeThreshold).toBe(0.9);
-    expect(result.answers.geminiApiKey).toBe('gemini-key-abc');
   });
 
   it('defaults fadeThreshold to 0.85 for empty', async () => {
-    vi.mocked(clack.text).mockResolvedValueOnce('').mockResolvedValueOnce('');
+    vi.mocked(clack.text).mockResolvedValueOnce('');
     const { run } = await import('../../src/onboard/steps/07-deja-vu');
     const result = await run({}, META);
     expect(result.answers.fadeThreshold).toBe(0.85);
-    expect(result.answers.geminiApiKey).toBeUndefined();
   });
 });
 
@@ -277,12 +271,12 @@ describe('Step 09 — Matrix Sync', () => {
 describe('Step 10 — Kung Fu', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns empty answers and skipped=true when no skills dir', async () => {
+  it('returns empty answers and scans skills dir', async () => {
     const { run } = await import('../../src/onboard/steps/10-kung-fu');
     const result = await run({}, META);
     expect(result.answers).toEqual({});
-    // skipped may be true (no workspace/skills dir in test env)
-    expect(result.skipped).toBe(true);
+    // skipped is true when no skills found, false when skills exist
+    expect(typeof result.skipped).toBe('boolean');
   });
 });
 

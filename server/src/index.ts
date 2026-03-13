@@ -281,12 +281,20 @@ async function main(): Promise<void> {
   });
 
   // Graceful shutdown
-  const shutdown = () => {
+  const shutdown = async () => {
     console.log();
     console.log(color.dim('  "See you in the next simulation." 🕶️'));
     console.log(digitalRain(1, 50));
     taskRunner.stop();
     server.close();
+    try {
+      const { runBackup } = await import('./db/backup.js');
+      const backupDir = join(process.cwd(), 'data', 'backups');
+      const dest = await runBackup(db, backupDir);
+      console.log(status.ok(`Backup saved: ${dest}`));
+    } catch {
+      // Don't block shutdown on backup failure
+    }
     closeDb();
     process.exit(0);
   };

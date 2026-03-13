@@ -4,7 +4,7 @@
  * "Throughout human history, we have been dependent on machines to survive."
  *
  * Structured logging utility for Neo-Agent.
- * Supports log levels, namespaced loggers, and optional file output.
+ * Color-coded namespaces, highlighted values, human-readable formatting.
  *
  * Usage:
  *   import { logger } from './utils/logger.js';
@@ -21,6 +21,41 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { ensureDir } from './fs.js';
 
+// ─── ANSI Helpers ────────────────────────────────────────────────
+
+const RESET = '\x1b[0m';
+const BOLD = '\x1b[1m';
+const DIM = '\x1b[2m';
+const ITALIC = '\x1b[3m';
+
+const FG = {
+  black: '\x1b[30m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m',
+  gray: '\x1b[90m',
+  brightRed: '\x1b[91m',
+  brightGreen: '\x1b[92m',
+  brightYellow: '\x1b[93m',
+  brightBlue: '\x1b[94m',
+  brightMagenta: '\x1b[95m',
+  brightCyan: '\x1b[96m',
+} as const;
+
+const BG = {
+  red: '\x1b[41m',
+  green: '\x1b[42m',
+  yellow: '\x1b[43m',
+  blue: '\x1b[44m',
+  magenta: '\x1b[45m',
+  cyan: '\x1b[46m',
+  white: '\x1b[47m',
+} as const;
+
 // ─── Log Levels ─────────────────────────────────────────────────
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -33,13 +68,64 @@ const LEVEL_PRIORITY: Record<LogLevel, number> = {
 };
 
 export const LEVEL_COLORS: Record<LogLevel, string> = {
-  debug: '\x1b[2m', // dim
-  info: '\x1b[32m', // green
-  warn: '\x1b[33m', // yellow
-  error: '\x1b[31m', // red
+  debug: DIM,
+  info: FG.green,
+  warn: FG.yellow,
+  error: FG.red,
 };
 
-const RESET = '\x1b[0m';
+const LEVEL_BADGES: Record<LogLevel, string> = {
+  debug: `${DIM}DBG${RESET}`,
+  info: `${FG.green}INF${RESET}`,
+  warn: `${BOLD}${FG.yellow}WRN${RESET}`,
+  error: `${BOLD}${BG.red}${FG.white} ERR ${RESET}`,
+};
+
+// ─── Namespace Colors ───────────────────────────────────────────
+// Each topic gets a distinct color for quick visual scanning.
+
+const NAMESPACE_STYLES: Record<string, string> = {
+  // Core pipeline
+  agent: `${BOLD}${FG.cyan}`,
+  bridge: `${FG.blue}`,
+
+  // Routing & classification
+  router: `${FG.magenta}`,
+  classifier: `${FG.magenta}`,
+  orchestrator: `${FG.brightMagenta}`,
+
+  // Security & guardrails
+  guardrails: `${FG.yellow}`,
+  bouncer: `${FG.yellow}`,
+  accountant: `${FG.yellow}`,
+  firewall: `${FG.yellow}`,
+  redactor: `${FG.yellow}`,
+  cleaner: `${FG.yellow}`,
+
+  // Gates
+  'gate:free-will': `${FG.brightYellow}`,
+  'gate:file-guard': `${FG.brightYellow}`,
+  'gate:cost': `${FG.brightYellow}`,
+
+  // Memory & sessions
+  'memory:transcript': `${FG.green}`,
+  'memory:extractor': `${FG.green}`,
+  'memory:long-term': `${FG.green}`,
+  session: `${FG.green}`,
+
+  // Channels
+  telegram: `${FG.brightBlue}`,
+  chat: `${FG.brightCyan}`,
+
+  // Infrastructure
+  server: `${FG.gray}`,
+  cron: `${FG.gray}`,
+  tasks: `${FG.gray}`,
+};
+
+function getNamespaceStyle(ns: string): string {
+  return NAMESPACE_STYLES[ns] ?? FG.cyan;
+}
 
 // ─── Configuration ──────────────────────────────────────────────
 
@@ -124,20 +210,122 @@ export interface Logger {
   error(message: string, errorOrData?: Error | Record<string, unknown>): void;
 }
 
-function formatForConsole(entry: LogEntry): string {
-  const color = LEVEL_COLORS[entry.level];
-  const levelTag = entry.level.toUpperCase().padEnd(5);
-  const ts = config.timestamps ? `\x1b[2m${entry.timestamp}\x1b[0m ` : '';
-  const ns = `\x1b[36m[${entry.namespace}]${RESET}`;
-  const msg = `${color}${levelTag}${RESET} ${ts}${ns} ${entry.message}`;
+// ─── Value Formatting ───────────────────────────────────────────
+// Highlight specific value types for quick visual scanning.
 
-  if (entry.error) {
-    return `${msg} ${LEVEL_COLORS.error}${entry.error.message}${RESET}${entry.error.stack ? `\n${LEVEL_COLORS.debug}${entry.error.stack}${RESET}` : ''}`;
+/** Keys whose values should be shown with special highlighting */
+const MODEL_KEYS = new Set(['model', 'selectedModel', 'lastModelTier', 'from', 'to']);
+const COST_KEYS = new Set(['cost', 'costUsd', 'totalCost']);
+const TOKEN_KEYS = new Set([
+  'tokens',
+  'input',
+  'output',
+  'inputTokens',
+  'outputTokens',
+  'totalInputTokens',
+  'totalOutputTokens',
+  'tokenEstimate',
+  'totalTokens',
+  'tokensUsed',
+]);
+const BOOL_KEYS = new Set([
+  'success',
+  'blocked',
+  'modified',
+  'isGroup',
+  'isError',
+  'hasMedia',
+  'shouldDecompose',
+]);
+const CONTENT_KEYS = new Set(['content', 'prompt']);
+const ID_KEYS = new Set(['sessionId', 'sdkSessionId', 'userId', 'profileId', 'toolUseId']);
+const SKIP_KEYS = new Set(['stack']); // shown separately
+
+function formatValue(key: string, value: unknown): string {
+  if (value === null || value === undefined) return `${DIM}null${RESET}`;
+
+  if (MODEL_KEYS.has(key) && typeof value === 'string') {
+    return `${BOLD}${FG.brightMagenta}${value}${RESET}`;
   }
+  if (COST_KEYS.has(key) && typeof value === 'number') {
+    const formatted = value < 0.01 ? value.toFixed(6) : value.toFixed(4);
+    const color = value > 1 ? FG.red : value > 0.1 ? FG.yellow : FG.green;
+    return `${color}$${formatted}${RESET}`;
+  }
+  if (TOKEN_KEYS.has(key) && typeof value === 'number') {
+    const formatted = value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+    return `${FG.brightCyan}${formatted}${RESET}`;
+  }
+  if (BOOL_KEYS.has(key) && typeof value === 'boolean') {
+    return value ? `${FG.green}✓${RESET}` : `${FG.red}✗${RESET}`;
+  }
+  if (CONTENT_KEYS.has(key) && typeof value === 'string') {
+    const truncated = value.length > 120 ? value.slice(0, 120) + '…' : value;
+    return `${FG.white}"${truncated}"${RESET}`;
+  }
+  if (ID_KEYS.has(key) && typeof value === 'string') {
+    const short = value.length > 12 ? value.slice(0, 8) + '…' : value;
+    return `${DIM}${short}${RESET}`;
+  }
+  if (typeof value === 'number') {
+    return `${FG.brightCyan}${value}${RESET}`;
+  }
+  if (typeof value === 'string') {
+    return `${FG.white}${value}${RESET}`;
+  }
+  if (typeof value === 'object') {
+    return `${DIM}${JSON.stringify(value)}${RESET}`;
+  }
+  return String(value);
+}
+
+function formatData(data: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (SKIP_KEYS.has(key)) continue;
+    if (value === undefined) continue;
+    parts.push(`${DIM}${key}=${RESET}${formatValue(key, value)}`);
+  }
+  return parts.join(' ');
+}
+
+// ─── Console Formatter ──────────────────────────────────────────
+
+function formatForConsole(entry: LogEntry): string {
+  const badge = LEVEL_BADGES[entry.level];
+  const nsStyle = getNamespaceStyle(entry.namespace);
+
+  // Timestamp: just HH:MM:SS for brevity
+  const ts = config.timestamps ? `${DIM}${entry.timestamp.slice(11, 19)}${RESET} ` : '';
+
+  // Namespace tag with topic color
+  const ns = `${nsStyle}[${entry.namespace}]${RESET}`;
+
+  // Message — bold for info+ levels
+  const msgStyle = entry.level === 'debug' ? DIM : '';
+  const msg = `${msgStyle}${entry.message}${msgStyle ? RESET : ''}`;
+
+  let line = `${badge} ${ts}${ns} ${msg}`;
+
+  // Data formatting
   if (entry.data && Object.keys(entry.data).length > 0) {
-    return `${msg} ${LEVEL_COLORS.debug}${JSON.stringify(entry.data)}${RESET}`;
+    line += `  ${formatData(entry.data)}`;
   }
-  return msg;
+
+  // Error formatting
+  if (entry.error) {
+    line += `  ${BOLD}${FG.red}${entry.error.message}${RESET}`;
+    if (entry.error.stack) {
+      line += `\n${DIM}${entry.error.stack}${RESET}`;
+    }
+  }
+
+  // Stack trace from data
+  if (entry.data?.stack && typeof entry.data.stack === 'string') {
+    line += `\n${DIM}${(entry.data.stack as string).slice(0, 500)}${RESET}`;
+  }
+
+  return line;
 }
 
 function formatForFile(entry: LogEntry): string {

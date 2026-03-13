@@ -132,7 +132,7 @@ export interface ClaudeBridgeOptions {
   cwd: string;
   model?: ModelTier;
   permissionMode?: string;
-  allowDangerouslySkipPermissions?: boolean;
+
   allowedTools?: string[];
   systemPrompt?: string;
   maxTurns?: number;
@@ -309,23 +309,6 @@ export interface AgentTeam {
   completedAt?: number;
 }
 
-export interface AgentMessage {
-  id: string;
-  teamId: string;
-  fromAgent: string;
-  toAgent: string; // '*' = broadcast
-  type: 'finding' | 'question' | 'update' | 'artifact';
-  content: string;
-  timestamp: number;
-}
-
-export interface SiblingStatus {
-  sessionId: string;
-  task?: string;
-  lockedFiles: string[];
-  startedAt: number;
-}
-
 export interface AgentConfig {
   maxConcurrentAgents: number;
   defaultSubAgentTimeout: number;
@@ -480,9 +463,7 @@ export interface WizardAnswers {
   gatePhrase: string;
   protectedPaths: string[];
   routingProfile: RoutingProfile;
-  composioApiKey?: string;
   telegramBotToken?: string;
-  geminiApiKey?: string;
   syncRepo?: string;
   tailscaleEnabled?: boolean;
   enableDashboard: boolean;

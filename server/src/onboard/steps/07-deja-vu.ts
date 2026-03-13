@@ -24,17 +24,9 @@ export const run: StepFn = async (_ctx, meta): Promise<StepResult> => {
   });
   if (clack.isCancel(fadeThreshold)) process.exit(0);
 
-  const geminiApiKey = await clack.text({
-    message: '🔮 Gemini API key (for semantic memory search):',
-    placeholder: 'Skip with Enter — FTS5 will be used instead',
-    defaultValue: '',
-  });
-  if (clack.isCancel(geminiApiKey)) process.exit(0);
-
   return {
     answers: {
       fadeThreshold: Number(fadeThreshold) || 0.85,
-      geminiApiKey: (geminiApiKey as string) || undefined,
     },
   };
 };

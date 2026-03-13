@@ -133,15 +133,9 @@ export async function runWizard(): Promise<void> {
         color.green(`Gate Phrase: ${answers.gatePhrase}`),
         color.green(`Fade:        ${answers.fadeThreshold}`),
         '',
-        answers.composioApiKey
-          ? color.dim(`Composio:    ✓ configured`)
-          : color.dim(`Composio:    ─ skipped`),
         answers.telegramBotToken
           ? color.dim(`Telegram:    ✓ configured`)
           : color.dim(`Telegram:    ─ skipped`),
-        answers.geminiApiKey
-          ? color.dim(`Gemini:      ✓ configured`)
-          : color.dim(`Gemini:      ─ skipped (FTS5 mode)`),
         answers.syncRepo
           ? color.dim(`Sync Repo:   ✓ configured`)
           : color.dim(`Sync Repo:   ─ skipped`),

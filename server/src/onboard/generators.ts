@@ -216,13 +216,6 @@ NEO_PROTECTED_PATHS=${answers.protectedPaths.join(',')}
 # ─── Router ────────────────────────────────────────────────────
 NEO_ROUTING_PROFILE=${answers.routingProfile}
 
-# ─── Tools ─────────────────────────────────────────────────────
-${answers.composioApiKey ? `COMPOSIO_API_KEY=${answers.composioApiKey}` : '# COMPOSIO_API_KEY='}
-# FIRECRAWL_API_KEY=
-
-# ─── AI / Semantic Memory ─────────────────────────────────────
-${answers.geminiApiKey ? `GEMINI_API_KEY=${answers.geminiApiKey}` : '# GEMINI_API_KEY='}
-
 # ─── Telegram ──────────────────────────────────────────────────
 ${answers.telegramBotToken ? `TELEGRAM_BOT_TOKEN=${answers.telegramBotToken}` : '# TELEGRAM_BOT_TOKEN='}
 
@@ -264,9 +257,7 @@ function updateEnvValues(envPath: string, answers: WizardAnswers): void {
   };
 
   // Also update optional keys if the wizard provided them
-  if (answers.composioApiKey) updates.COMPOSIO_API_KEY = answers.composioApiKey;
   if (answers.telegramBotToken) updates.TELEGRAM_BOT_TOKEN = answers.telegramBotToken;
-  if (answers.geminiApiKey) updates.GEMINI_API_KEY = answers.geminiApiKey;
   if (answers.syncRepo) updates.NEO_SYNC_REPO = answers.syncRepo;
   if (answers.tailscaleEnabled !== undefined)
     updates.NEO_TAILSCALE_ENABLED = answers.tailscaleEnabled ? 'true' : 'false';
