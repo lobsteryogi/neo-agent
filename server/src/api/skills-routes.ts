@@ -268,6 +268,7 @@ export function registerSkillRoutes(
   skillRegistry: SkillRegistry,
   skillsDir: string,
   bridge: ClaudeBridge,
+  onSkillChanged?: () => void,
 ): void {
   // ─── List skills ─────────────────────────────────────────────
   app.get(
@@ -388,6 +389,12 @@ export function registerSkillRoutes(
       skillRegistry.remove(name);
       log.info('skill deleted', { name, path: skill.path });
       res.json({ ok: true });
+
+      // Schedule server restart so all registries drop the removed skill
+      if (onSkillChanged) {
+        log.info('skill removed, scheduling server restart');
+        setTimeout(onSkillChanged, 500);
+      }
     }),
   );
 
@@ -434,6 +441,12 @@ export function registerSkillRoutes(
 
       log.info('skill saved', { name: safeName, path: skillDir, destination });
       res.status(201).json(skill);
+
+      // Schedule server restart so all registries pick up the new skill
+      if (onSkillChanged) {
+        log.info('skill change detected, scheduling server restart');
+        setTimeout(onSkillChanged, 500);
+      }
     }),
   );
 }

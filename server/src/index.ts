@@ -98,7 +98,12 @@ async function main(): Promise<void> {
 
   // Skills routes (needs bridge for AI generation)
   const { registerSkillRoutes } = await import('./api/skills-routes.js');
-  registerSkillRoutes(app, skillRegistry, NeoHome.skills, bridge);
+  const scheduleRestart = () => {
+    console.log(status.warn('Skill changed — restarting server...'));
+    // Exit cleanly; pm2 / tsx watch / systemd will restart the process
+    process.kill(process.pid, 'SIGTERM');
+  };
+  registerSkillRoutes(app, skillRegistry, NeoHome.skills, bridge, scheduleRestart);
   console.log(status.ok(`Skills loaded (${skillRegistry.size} skills)`));
 
   app.get('/api/agents/blueprints', (_req, res) => {

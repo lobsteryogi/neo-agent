@@ -24,12 +24,15 @@ export interface LearnOptions {
 
 export class SkillLearner {
   private clawhub: ClawHubClient;
+  private onSkillChanged?: () => void;
 
   constructor(
     private skillsDir: string,
     private registry: SkillRegistry,
+    onSkillChanged?: () => void,
   ) {
     this.clawhub = new ClawHubClient();
+    this.onSkillChanged = onSkillChanged;
   }
 
   /**
@@ -69,6 +72,9 @@ export class SkillLearner {
     // Reload registry to pick up the new skill
     this.registry.reload(this.skillsDir);
 
+    // Schedule server restart so all components pick up the new skill
+    if (this.onSkillChanged) setTimeout(this.onSkillChanged, 500);
+
     return skillDir;
   }
 
@@ -97,6 +103,9 @@ export class SkillLearner {
 
     // Reload registry to pick up the new skill
     this.registry.reload(this.skillsDir);
+
+    // Schedule server restart so all components pick up the new skill
+    if (this.onSkillChanged) setTimeout(this.onSkillChanged, 500);
 
     return skillDir;
   }
