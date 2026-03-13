@@ -452,8 +452,9 @@ export class NeoAgent {
       response = await this.bridge.run(sanitized.content, retryOpts);
     }
 
-    // Capture SDK session ID from response messages
+    // Capture SDK session ID and written files from response messages
     const sdkSessionId = this.extractSdkSessionId(response);
+    const writtenFiles = this.extractWrittenFiles(response);
 
     // 7. Harness
     const validated = await this.harness.process(response, session);
@@ -526,6 +527,7 @@ export class NeoAgent {
       inputTokens,
       costUsd,
       warnings: warnings.length > 0 ? warnings : undefined,
+      files: writtenFiles.length > 0 ? writtenFiles : undefined,
     };
   }
 
@@ -702,6 +704,26 @@ ${conversationText}
       if (msg.session_id) return msg.session_id;
     }
     return undefined;
+  }
+
+  /** Extract file paths written/created by Write tool during this turn. */
+  private extractWrittenFiles(response: any): string[] {
+    const messages = response?.data?.messages;
+    if (!Array.isArray(messages)) return [];
+    const files: string[] = [];
+    for (const msg of messages) {
+      const content = msg?.message?.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        if (block.type !== 'tool_use') continue;
+        if (block.name !== 'Write') continue;
+        const filePath = (block.input as any)?.file_path;
+        if (typeof filePath === 'string' && !files.includes(filePath)) {
+          files.push(filePath);
+        }
+      }
+    }
+    return files;
   }
 
   private looksLikeExecution(content: string): boolean {

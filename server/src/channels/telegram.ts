@@ -298,7 +298,10 @@ export class TelegramChannel implements ChannelAdapter {
   // ─── Response Delivery ──────────────────────────────────
 
   private async sendResponse(
-    ctx: { reply: (text: string, opts?: any) => Promise<unknown> },
+    ctx: {
+      reply: (text: string, opts?: any) => Promise<unknown>;
+      replyWithDocument?: (doc: any, opts?: any) => Promise<unknown>;
+    },
     response: AgentResponse | void,
     startMs: number,
   ): Promise<void> {
@@ -309,6 +312,24 @@ export class TelegramChannel implements ChannelAdapter {
       console.warn('[Telegram] HTML parse failed, fallback to plain:', err.message);
       return ctx.reply(reply);
     });
+
+    // Send any files the agent wrote as document attachments
+    if (response.files?.length && ctx.replyWithDocument) {
+      const { InputFile } = await import('grammy');
+      for (const filePath of response.files) {
+        try {
+          const { existsSync, statSync } = await import('fs');
+          if (!existsSync(filePath)) continue;
+          const stat = statSync(filePath);
+          // Skip files larger than 50MB (Telegram limit)
+          if (stat.size > 50 * 1024 * 1024) continue;
+          const fileName = filePath.split('/').pop() ?? 'file';
+          await ctx.replyWithDocument(new InputFile(filePath, fileName));
+        } catch (err) {
+          console.warn(`[Telegram] Failed to send file ${filePath}:`, (err as Error).message);
+        }
+      }
+    }
   }
 
   // ─── Markdown → Telegram HTML ─────────────────────────

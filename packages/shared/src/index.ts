@@ -204,6 +204,8 @@ export interface AgentResponse {
   retryable?: boolean;
   gateBlocked?: GateVerdict;
   warnings?: string[];
+  /** File paths written/created by the agent during this turn. */
+  files?: string[];
 }
 
 // ─── Memory ────────────────────────────────────────────────────
