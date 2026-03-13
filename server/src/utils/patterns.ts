@@ -6,10 +6,22 @@
  * Reusable detection patterns shared across CLI and agent pipeline.
  */
 
-import type { ModelTier, RoutingProfile } from '@neo-agent/shared';
+import type { ClaudeResult, ModelTier, RoutingProfile } from '@neo-agent/shared';
 import type { LogEntry } from './logger.js';
 
 // ─── Constants ────────────────────────────────────────────────
+
+export const DEFAULT_AGENT_TOOLS: readonly string[] = [
+  'Read',
+  'Write',
+  'Edit',
+  'Bash',
+  'Glob',
+  'Grep',
+  'WebSearch',
+  'WebFetch',
+  'Agent',
+] as const;
 
 export const VALID_MODEL_TIERS: readonly ModelTier[] = ['haiku', 'sonnet', 'opus'] as const;
 export const VALID_ROUTING_PROFILES: readonly RoutingProfile[] = [
@@ -18,6 +30,18 @@ export const VALID_ROUTING_PROFILES: readonly RoutingProfile[] = [
   'balanced',
   'premium',
 ] as const;
+
+// ─── Timeout Detection ───────────────────────────────────────
+
+/** Check if a ClaudeResult indicates a timeout or abort. */
+export function isTimeoutResult(result: ClaudeResult): boolean {
+  return (
+    !result.success &&
+    ((result.error ?? '').toLowerCase().includes('timeout') ||
+      (result.message ?? '').toLowerCase().includes('timeout') ||
+      (result.error ?? '').includes('ABORT_SIGNAL'))
+  );
+}
 
 // ─── Short Followup Detection ─────────────────────────────────
 

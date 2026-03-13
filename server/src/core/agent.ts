@@ -34,11 +34,13 @@ import { SkillRegistry } from '../skills/registry.js';
 import { logger } from '../utils/logger.js';
 import {
   calculateTimeoutMs,
+  DEFAULT_AGENT_TOOLS,
   formatDebugLogs,
   injectCompactedContext,
   injectDebugContext,
   isDebugIntent,
   isShortFollowup,
+  isTimeoutResult,
 } from '../utils/patterns.js';
 import { getRecentLogs } from '../utils/logger.js';
 import { UserProfileRepo } from '../db/user-profile-repo.js';
@@ -411,17 +413,7 @@ export class NeoAgent {
       cwd: isNeoDev ? process.cwd().replace(/\/server$/, '') : workspaceCwd,
       model: route.selectedModel,
       permissionMode: isNeoDev ? 'dontAsk' : this.config.permissionMode,
-      allowedTools: route.allowedTools ?? [
-        'Read',
-        'Write',
-        'Edit',
-        'Bash',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Agent',
-      ],
+      allowedTools: route.allowedTools ?? [...DEFAULT_AGENT_TOOLS],
       systemPrompt,
       maxTurns: route.maxTurns,
       timeoutMs,
@@ -449,12 +441,7 @@ export class NeoAgent {
     }
 
     // Auto-retry on timeout
-    const isTimeout =
-      !response.success &&
-      ((response.error ?? '').toLowerCase().includes('timeout') ||
-        (response.message ?? '').toLowerCase().includes('timeout') ||
-        (response.error ?? '').includes('ABORT_SIGNAL'));
-    if (isTimeout) {
+    if (isTimeoutResult(response)) {
       log.warn('Timeout, auto-retrying', { maxTurns: runOpts.maxTurns });
       const retryOpts = {
         ...runOpts,
@@ -544,7 +531,7 @@ export class NeoAgent {
 
   // ─── System Prompt ──────────────────────────────────────────
 
-  private buildSystemPrompt(session: any, message: InboundMessage): string {
+  private buildSystemPrompt(session: Session, message: InboundMessage): string {
     // Resolve the user's display name — per-user profile for Telegram DMs, global fallback otherwise
     let userName = this.config.userName;
     if (message.channel === 'telegram' && message.userId && !message.metadata?.isGroup) {

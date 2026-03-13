@@ -92,6 +92,7 @@ export class SessionManager {
         total_input_tokens = excluded.total_input_tokens,
         total_output_tokens = excluded.total_output_tokens,
         total_cost = excluded.total_cost,
+        last_model = excluded.last_model,
         updated_at = excluded.updated_at
     `,
       )

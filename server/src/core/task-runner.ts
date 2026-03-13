@@ -13,6 +13,7 @@ import { NeoHome } from './neo-home.js';
 import type { TaskRepo } from '../db/task-repo.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { DEFAULT_AGENT_TOOLS } from '../utils/patterns.js';
 import { fireWebhook } from '../utils/webhooks.js';
 
 const log = logger('task-runner');
@@ -171,17 +172,7 @@ export class TaskRunner {
         model: (task.model ?? this.config.model ?? 'sonnet') as 'sonnet' | 'opus' | 'haiku',
         maxTurns: 20,
         timeoutMs: 300_000,
-        allowedTools: [
-          'Read',
-          'Write',
-          'Edit',
-          'Bash',
-          'Glob',
-          'Grep',
-          'WebSearch',
-          'WebFetch',
-          'Agent',
-        ],
+        allowedTools: [...DEFAULT_AGENT_TOOLS],
         permissionMode: 'dontAsk',
       });
 
@@ -377,17 +368,7 @@ export class TaskRunner {
         model: (task.model ?? this.config.model ?? 'sonnet') as 'sonnet' | 'opus' | 'haiku',
         maxTurns: 20,
         timeoutMs: 300_000,
-        allowedTools: [
-          'Read',
-          'Write',
-          'Edit',
-          'Bash',
-          'Glob',
-          'Grep',
-          'WebSearch',
-          'WebFetch',
-          'Agent',
-        ],
+        allowedTools: [...DEFAULT_AGENT_TOOLS],
         permissionMode: 'dontAsk',
       });
 

@@ -130,11 +130,23 @@ vi.mock('../../src/utils/logger.js', () => ({
 
 vi.mock('../../src/utils/patterns.js', () => ({
   calculateTimeoutMs: vi.fn().mockReturnValue(120000),
+  DEFAULT_AGENT_TOOLS: [
+    'Read',
+    'Write',
+    'Edit',
+    'Bash',
+    'Glob',
+    'Grep',
+    'WebSearch',
+    'WebFetch',
+    'Agent',
+  ],
   formatDebugLogs: vi.fn().mockReturnValue(''),
   injectCompactedContext: vi.fn().mockImplementation((prompt: string, ctx: string) => prompt + ctx),
   injectDebugContext: vi.fn().mockImplementation((prompt: string, dbg: string) => prompt + dbg),
   isDebugIntent: vi.fn().mockReturnValue(false),
   isShortFollowup: vi.fn().mockReturnValue(false),
+  isTimeoutResult: vi.fn().mockReturnValue(false),
 }));
 
 import { createMemoryDb } from '../../src/db/connection';

@@ -824,7 +824,9 @@ export class TelegramChannel implements ChannelAdapter {
     },
   ): Promise<Attachment> {
     const file = await ctx.getFile();
-    const localPath = await this.downloadFile(file.file_path!);
+    if (!file.file_path)
+      throw new Error('Telegram did not return a file_path (file may be too large)');
+    const localPath = await this.downloadFile(file.file_path);
 
     return {
       id: meta.fileUniqueId,

@@ -18,6 +18,7 @@ import type { Express } from 'express';
 import type { ClaudeBridge } from '../core/claude-bridge.js';
 import { NeoHome } from '../core/neo-home.js';
 import type { SkillRegistry } from '../skills/index.js';
+import { getErrorMessage } from '../utils/errors.js';
 import { parseFrontmatter } from '../utils/frontmatter.js';
 import { stripMarkdownFences } from '../utils/strip-fences.js';
 import { logger } from '../utils/logger.js';
@@ -318,7 +319,7 @@ export function registerSkillRoutes(
           try {
             ghResult = await fetchGitHubContent(ghRef);
           } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
+            const msg = getErrorMessage(err);
             return res.status(400).json({ error: `GitHub fetch failed: ${msg}` });
           }
 
@@ -348,7 +349,7 @@ export function registerSkillRoutes(
         try {
           pageText = await fetchUrlText(url.trim());
         } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = getErrorMessage(err);
           return res.status(400).json({ error: `Failed to fetch URL: ${msg}` });
         }
         const extraContext = prompt?.trim() ? `\n\nAdditional context: ${prompt.trim()}` : '';

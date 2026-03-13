@@ -238,7 +238,7 @@ export class TaskRepo {
 
       const now = Date.now();
       const completedAt = status === 'done' ? now : null;
-      const startedAt = status === 'in_progress' ? now : null;
+      const startedAt = status === 'in_progress' ? now : (existing.startedAt ?? null);
 
       this.db
         .prepare(

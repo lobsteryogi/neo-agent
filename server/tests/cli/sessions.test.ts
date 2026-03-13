@@ -218,15 +218,13 @@ describe('SessionManager', () => {
       expect(row.last_model).toBe('opus');
     });
 
-    it('does not update lastModelTier on conflict (by design)', () => {
-      // The ON CONFLICT UPDATE clause intentionally omits last_model
+    it('persists lastModelTier on conflict update', () => {
       const session = mgr.current;
       session.lastModelTier = 'opus';
       mgr.save(session);
 
       const row = db.prepare('SELECT * FROM chat_sessions WHERE id = ?').get(session.id) as any;
-      // last_model is NOT updated on conflict — this reflects actual code behavior
-      expect(row.last_model).toBeNull();
+      expect(row.last_model).toBe('opus');
     });
   });
 

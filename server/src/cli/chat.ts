@@ -28,10 +28,12 @@ import { enableLogRelay, getRecentLogs, logger } from '../utils/logger.js';
 import {
   buildTranscriptMarkdown,
   calculateTimeoutMs,
+  DEFAULT_AGENT_TOOLS,
   formatDebugLogs,
   injectCompactedContext,
   injectDebugContext,
   isDebugIntent,
+  isTimeoutResult,
 } from '../utils/patterns.js';
 import { color, getSpinnerFrame } from '../utils/terminal.js';
 import { TaskRepo } from '../db/task-repo.js';
@@ -271,17 +273,7 @@ async function processInput(input: string): Promise<void> {
       timeoutMs,
       systemPrompt: effectiveSystemPrompt,
       permissionMode: permMode,
-      allowedTools: [
-        'Read',
-        'Write',
-        'Edit',
-        'Bash',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Agent',
-      ],
+      allowedTools: [...DEFAULT_AGENT_TOOLS],
     };
 
     // Self-debug intent detection
@@ -336,12 +328,7 @@ async function processInput(input: string): Promise<void> {
     }
 
     // Auto-retry on timeout — once, with halved maxTurns
-    const isTimeout =
-      !result.success &&
-      ((result.error ?? '').toLowerCase().includes('timeout') ||
-        (result.message ?? '').toLowerCase().includes('timeout') ||
-        (result.error ?? '').includes('ABORT_SIGNAL'));
-    if (isTimeout) {
+    if (isTimeoutResult(result)) {
       process.stdout.write(
         `\r\x1b[K  ${color.amber('⏱')} ${color.dim('Timed out — retrying with shorter budget...')}\n`,
       );

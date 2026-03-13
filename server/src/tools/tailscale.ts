@@ -143,7 +143,7 @@ export class TailscaleTool implements ToolIntegration {
 
   /** Ping a peer by hostname or IP. Returns latency string or throws on failure. */
   async ping(host: string): Promise<string> {
-    const result = execSync(`tailscale ping --c 1 ${host}`, {
+    const result = execFileSync('tailscale', ['ping', '--c', '1', host], {
       encoding: 'utf-8',
       stdio: 'pipe',
       timeout: 15_000,
